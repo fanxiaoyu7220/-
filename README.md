@@ -189,6 +189,27 @@ dist/ACAN Studio.app
 可以把这个 `.app` 拖到“应用程序”文件夹中使用。
 如果项目目录下存在 `icon.icns`，打包时会自动使用它作为应用图标；没有则使用默认图标。
 
+## 生成可下载的 DMG
+
+如果想给别人提供一个可以下载的安装镜像，在项目目录运行：
+
+```bash
+chmod +x build_dmg.sh
+./build_dmg.sh
+```
+
+完成后会生成：
+
+```text
+dist/ACAN-Studio-1.0.0.dmg
+```
+
+打开 DMG 后，把 `ACAN Studio.app` 拖到 `Applications` 文件夹即可。
+
+当前 DMG 是测试版，尚未使用 Apple Developer ID 签名和公证。朋友第一次打开时，如果 macOS 提示无法验证开发者，可以右键点击应用，选择“打开”后再确认。
+
+DMG 只打包应用本身；`yt-dlp`、`ffmpeg`、`tesseract` 等后台工具仍需要按“需要提前安装”中的说明准备。要做到完全下载后即用，还需要把这些工具及其许可证一起打进应用。
+
 ## 说明
 
 - 所有下载、转码命令都在后台执行，不会打开终端窗口。

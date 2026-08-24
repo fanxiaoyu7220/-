@@ -166,21 +166,29 @@ else
   exit 1
 fi
 
-echo "正在安装最新版到 /Applications..."
-if cp -Rf "$APP_BUNDLE" "/Applications/"; then
-  rm -rf "$APP_BUNDLE"
-  killall Dock >/dev/null 2>&1 || true
+if [ "${ACAN_SKIP_INSTALL:-0}" = "1" ]; then
+  echo "已跳过安装到 /Applications，保留 $APP_BUNDLE 供后续打包。"
 else
-  echo "安装失败：无法复制 $APP_BUNDLE 到 /Applications/"
-  echo "请检查是否有权限写入 /Applications，或手动把 $APP_BUNDLE 拖到应用程序文件夹。"
-  exit 1
+  echo "正在安装最新版到 /Applications..."
+  if cp -Rf "$APP_BUNDLE" "/Applications/"; then
+    rm -rf "$APP_BUNDLE"
+    killall Dock >/dev/null 2>&1 || true
+  else
+    echo "安装失败：无法复制 $APP_BUNDLE 到 /Applications/"
+    echo "请检查是否有权限写入 /Applications，或手动把 $APP_BUNDLE 拖到应用程序文件夹。"
+    exit 1
+  fi
 fi
 
 echo ""
 echo "打包完成"
-echo "已安装最新版到 $APPLICATIONS_APP"
-echo "已清理 dist 里的临时 App，避免 Launchpad 出现两个图标"
-echo "双击 /Applications/$APP_NAME.app 即可打开图形界面，不会弹出终端窗口。"
+if [ "${ACAN_SKIP_INSTALL:-0}" = "1" ]; then
+  echo "已保留 $APP_BUNDLE"
+else
+  echo "已安装最新版到 $APPLICATIONS_APP"
+  echo "已清理 dist 里的临时 App，避免 Launchpad 出现两个图标"
+  echo "双击 /Applications/$APP_NAME.app 即可打开图形界面，不会弹出终端窗口。"
+fi
 echo "后台工具："
 echo "  yt-dlp：$YTDLP_PATH"
 echo "  ffmpeg ：$FFMPEG_PATH"
