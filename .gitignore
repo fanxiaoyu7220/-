@@ -1,0 +1,52 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build and packaging output
+build/
+dist/
+.pyinstaller-cache/
+*.dmg
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+settings.json
+cookies.txt
+Cookies.txt
+*.log
+
+# Generated media and analysis output
+Creator/
+downloads/
+outputs/
+*.mp3
+*.wav
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.m4v
+*.webm
+*.srt
+
+# Local/obsolete development copies
+main_backup_*.py
+main_mp3_url_extract.py
