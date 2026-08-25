@@ -98,7 +98,7 @@ Creator/
 
 ## 需要提前安装
 
-这个应用不会弹出终端窗口，但后台需要这些工具已经安装好：
+源码直接运行时，后台需要这些工具：
 
 - `yt-dlp`
 - `ffmpeg`
@@ -110,6 +110,8 @@ Creator/
 ```bash
 brew install yt-dlp ffmpeg tesseract
 ```
+
+使用已经构建好的 DMG 时，`yt-dlp`、`ffmpeg`、`ffprobe`、`tesseract` 和中英文 OCR 数据会随应用一起提供，不需要在朋友的 Mac 上安装 Homebrew。Whisper / faster-whisper 仍然是可选功能，未放入默认 DMG，以免安装包过大。
 
 首次启动时，如果检测到 OCR 或 Whisper 缺失，会显示安装向导。点击“一键安装”会后台执行：
 
@@ -201,14 +203,18 @@ chmod +x build_dmg.sh
 完成后会生成：
 
 ```text
-dist/ACAN-Studio-1.0.0.dmg
+dist/ACAN-Studio-1.1.0.dmg
 ```
 
 打开 DMG 后，把 `ACAN Studio.app` 拖到 `Applications` 文件夹即可。
 
-当前 DMG 是测试版，尚未使用 Apple Developer ID 签名和公证。朋友第一次打开时，如果 macOS 提示无法验证开发者，可以右键点击应用，选择“打开”后再确认。
+当前 DMG 会把下载、转码和 OCR 所需的后台工具及第三方许可说明一起打进应用。它仍是测试版，尚未使用 Apple Developer ID 签名和公证；朋友第一次打开时，如果 macOS 提示无法验证开发者，可以右键点击应用，选择“打开”后再确认。
 
-DMG 只打包应用本身；`yt-dlp`、`ffmpeg`、`tesseract` 等后台工具仍需要按“需要提前安装”中的说明准备。要做到完全下载后即用，还需要把这些工具及其许可证一起打进应用。
+构建内置工具需要在制作者的 Mac 上准备 Homebrew、`dylibbundler` 和 `tesseract-lang`：
+
+```bash
+brew install dylibbundler tesseract-lang
+```
 
 ## 说明
 

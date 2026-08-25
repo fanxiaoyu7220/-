@@ -77,6 +77,34 @@ PYINSTALLER_ARGS=(
   --name "$APP_NAME"
 )
 
+if [ -n "${ACAN_BUNDLED_TOOLS_DIR:-}" ]; then
+  BUNDLED_ROOT="$ACAN_BUNDLED_TOOLS_DIR"
+  echo "正在把内置后台工具加入应用..."
+  for tool_name in yt-dlp ffmpeg ffprobe tesseract; do
+    tool_path="$BUNDLED_ROOT/tools/$tool_name"
+    if [ ! -x "$tool_path" ]; then
+      echo "打包失败：缺少内置工具 $tool_path"
+      exit 1
+    fi
+    PYINSTALLER_ARGS+=("--add-binary=${tool_path}:tools")
+  done
+
+  if [ -d "$BUNDLED_ROOT/tools/lib" ]; then
+    setopt null_glob
+    for library_path in "$BUNDLED_ROOT"/tools/lib/*.dylib; do
+      PYINSTALLER_ARGS+=("--add-binary=${library_path}:lib")
+    done
+  fi
+
+  if [ -d "$BUNDLED_ROOT/tessdata" ]; then
+    PYINSTALLER_ARGS+=("--add-data=$BUNDLED_ROOT/tessdata:tessdata")
+  fi
+fi
+
+if [ -f "THIRD_PARTY_NOTICES.md" ]; then
+  PYINSTALLER_ARGS+=("--add-data=$PWD/THIRD_PARTY_NOTICES.md:.")
+fi
+
 if [ -f "$ICON_PATH" ]; then
   echo "已找到图标：$ICON_PATH"
   PYINSTALLER_ARGS+=(--icon "$ICON_PATH")

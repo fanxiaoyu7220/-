@@ -60,6 +60,8 @@ COMMON_TOOL_DIRS = [
     "/bin",
     "/opt/local/bin",
 ]
+EMBEDDED_TOOL_DIR_NAME = "tools"
+EMBEDDED_TESSDATA_DIR_NAME = "tessdata"
 URL_PATTERN = re.compile(r"https?://[^\s]+")
 YTDLP_PERCENT_PATTERN = re.compile(r"\[download\]\s+(?P<percent>\d+(?:\.\d+)?)%")
 YTDLP_SPEED_PATTERN = re.compile(r"\bat\s+(?P<speed>\S+/s)")
@@ -180,6 +182,8 @@ DOWNLOAD_ENGINE_REGISTRY = {
 class ACANCreatorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+
+        self._configure_embedded_environment()
 
         self.log_queue = queue.Queue()
         self.worker_thread = None
@@ -3247,7 +3251,73 @@ class ACANCreatorApp(ctk.CTk):
             Path.home() / "Library/Application Support/Google/Chrome/Profile 2/Cookies",
         ]
 
+    @staticmethod
+    def _embedded_resource_roots():
+        roots = []
+
+        def add(path):
+            if not path:
+                return
+            try:
+                resolved = Path(path).expanduser().resolve()
+            except Exception:
+                return
+            if resolved not in roots:
+                roots.append(resolved)
+
+        add(os.environ.get("ACAN_STUDIO_EMBEDDED_TOOLS_DIR"))
+        add(getattr(sys, "_MEIPASS", None))
+
+        if getattr(sys, "frozen", False):
+            try:
+                executable = Path(sys.executable).resolve()
+                add(executable.parent.parent / "Resources")
+                add(executable.parent)
+            except Exception:
+                pass
+
+        return roots
+
+    @classmethod
+    def _bundled_tool_path(cls, tool_name):
+        for root in cls._embedded_resource_roots():
+            for candidate in (
+                root / EMBEDDED_TOOL_DIR_NAME / tool_name,
+                root / tool_name,
+            ):
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    return str(candidate)
+        return None
+
+    @classmethod
+    def _bundled_tessdata_dir(cls):
+        for root in cls._embedded_resource_roots():
+            candidate = root / EMBEDDED_TESSDATA_DIR_NAME
+            if candidate.is_dir():
+                return candidate
+        return None
+
+    @classmethod
+    def _configure_embedded_environment(cls):
+        tool_dirs = []
+        for root in cls._embedded_resource_roots():
+            tool_dir = root / EMBEDDED_TOOL_DIR_NAME
+            if tool_dir.is_dir():
+                tool_dirs.append(str(tool_dir))
+
+        if tool_dirs:
+            current_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = os.pathsep.join([*tool_dirs, current_path])
+
+        tessdata_dir = cls._bundled_tessdata_dir()
+        if tessdata_dir:
+            os.environ["TESSDATA_PREFIX"] = str(tessdata_dir)
+
     def _find_tool(self, tool_name):
+        bundled_path = self._bundled_tool_path(tool_name)
+        if bundled_path:
+            return bundled_path
+
         path = shutil.which(tool_name)
         if path:
             return path
@@ -3421,7 +3491,16 @@ class ACANCreatorApp(ctk.CTk):
     def _command_environment(self):
         env = os.environ.copy()
         current_path = env.get("PATH", "")
-        env["PATH"] = ":".join([*COMMON_TOOL_DIRS, current_path])
+        tool_dirs = []
+        for root in self._embedded_resource_roots():
+            tool_dir = root / EMBEDDED_TOOL_DIR_NAME
+            if tool_dir.is_dir():
+                tool_dirs.append(str(tool_dir))
+        env["PATH"] = os.pathsep.join([*tool_dirs, *COMMON_TOOL_DIRS, current_path])
+
+        tessdata_dir = self._bundled_tessdata_dir()
+        if tessdata_dir:
+            env["TESSDATA_PREFIX"] = str(tessdata_dir)
         return env
 
     def _open_finder(self, path):
