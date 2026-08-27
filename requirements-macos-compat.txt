@@ -1,0 +1,12 @@
+customtkinter==6.0.0
+pyinstaller==6.22.2
+pillow==12.3.0
+pytesseract==0.3.13
+yt-dlp==2026.8.19
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+tokenizers==0.23.1
+onnxruntime==1.19.2
+av==14.1.0
+numpy==1.26.4
+protobuf==4.25.8

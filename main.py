@@ -62,10 +62,19 @@ COMMON_TOOL_DIRS = [
 ]
 EMBEDDED_TOOL_DIR_NAME = "tools"
 EMBEDDED_TESSDATA_DIR_NAME = "tessdata"
+EMBEDDED_MODEL_DIR_NAME = "models"
+FASTER_WHISPER_MODEL_DIR_NAME = "faster-whisper-base"
 URL_PATTERN = re.compile(r"https?://[^\s]+")
 YTDLP_PERCENT_PATTERN = re.compile(r"\[download\]\s+(?P<percent>\d+(?:\.\d+)?)%")
 YTDLP_SPEED_PATTERN = re.compile(r"\bat\s+(?P<speed>\S+/s)")
 YTDLP_ETA_PATTERN = re.compile(r"\bETA\s+(?P<eta>\S+)")
+YTDLP_EXPECTED_DURATION_PATTERN = re.compile(r"ACAN_EXPECTED_DURATION=(?P<duration>\d+(?:\.\d+)?)")
+YTDLP_DOWNLOADED_FILE_PATTERN = re.compile(r"ACAN_DOWNLOADED_FILE=(?P<path>.+)")
+MGTV_SVIP_FILTERS = (
+    "mgtv_purview = 200",
+    "!mgtv_access_hint",
+    "mgtv_access_hint !*= SVIP",
+)
 DOUYIN_LOGIN_ERROR_KEYWORDS = (
     "login required",
     "authentication",
@@ -146,6 +155,7 @@ UNKNOWN_PLATFORM = {
 BROWSER_CHOICES = {
     "自动": "chrome",
     "Chrome": "chrome",
+    "Safari": "safari",
     "Edge": "edge",
     "Firefox": "firefox",
 }
@@ -749,12 +759,19 @@ class ACANCreatorApp(ctk.CTk):
         return engines[0]
 
     def _build_yt_dlp_download_attempts(self, platform, url, destination_dir, engine):
-        output_template = str(destination_dir / "%(uploader|未知作者).100B" / "%(upload_date|未知日期)s_%(title).200B.%(ext)s")
+        # Include the platform video ID so episodes with the same title/date do
+        # not collide. This is especially important for MangoTV program pages.
+        output_template = str(destination_dir / "%(uploader|未知作者).100B" / "%(upload_date|未知日期)s_%(title).200B_[%(id|未知ID)s].%(ext)s")
         base_command = [
             "yt-dlp",
             "--merge-output-format",
             "mp4",
             "--no-mtime",
+            "--no-simulate",
+            "--print",
+            "before_dl:ACAN_EXPECTED_DURATION=%(duration|0)s",
+            "--print",
+            "after_move:ACAN_DOWNLOADED_FILE=%(filepath)s",
             "-o",
             output_template,
             url,
@@ -789,16 +806,23 @@ class ACANCreatorApp(ctk.CTk):
                 "--user-agent",
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
             ]
-            return [
+            access_filter = [item for expression in MGTV_SVIP_FILTERS for item in ("--match-filter", expression)]
+            cookie_args = self._cookie_args()
+            attempts = []
+            if cookie_args:
+                attempts.append(
+                    (
+                        f"{engine['name']}：芒果TV第一次尝试：使用设置中的登录态",
+                        ["yt-dlp", *cookie_args, *browser_headers, *access_filter, *base_command[1:]],
+                    )
+                )
+            attempts.append(
                 (
-                    f"{engine['name']}：芒果TV第一次尝试：原始播放页 + Chrome 登录态",
-                    ["yt-dlp", "--cookies-from-browser", "chrome", *browser_headers, *base_command[1:]],
-                ),
-                (
-                    f"{engine['name']}：芒果TV第二次尝试：原始播放页标准下载",
-                    base_command,
-                ),
-            ]
+                    f"{engine['name']}：芒果TV标准下载",
+                    ["yt-dlp", *browser_headers, *access_filter, *base_command[1:]],
+                )
+            )
+            return attempts
 
         cookie_args = self._cookie_args()
         return [
@@ -915,6 +939,8 @@ class ACANCreatorApp(ctk.CTk):
             return
 
         required_tools = ["yt-dlp"]
+        if self._mode_needs_download(mode):
+            required_tools.append("ffprobe")
         should_fix = self._mode_needs_fix(mode) or (platform["name"] == "YouTube" and mode == "下载视频")
         if should_fix or self._mode_needs_ocr(mode) or self._mode_needs_subtitles(mode) or self._mode_needs_transcript(mode):
             required_tools.append("ffmpeg")
@@ -995,14 +1021,47 @@ class ACANCreatorApp(ctk.CTk):
                 if not ok:
                     return
 
-                downloaded_path = self._latest_file_since(destination_dir, started_at)
-
-                if not downloaded_path and output:
-                    downloaded_path = self._latest_file_since(destination_dir, 0)
+                downloaded_path = self._extract_downloaded_file(output, destination_dir)
+                if downloaded_path:
+                    try:
+                        if downloaded_path.stat().st_mtime < started_at - 3:
+                            self.log_queue.put(("log", f"检测到同一视频已有文件，直接校验：{downloaded_path}"))
+                    except OSError:
+                        pass
+                else:
+                    downloaded_path = self._latest_file_since(destination_dir, started_at)
 
                 if not downloaded_path:
-                    self.log_queue.put(("error", "下载已结束，但没有找到下载完成的视频文件。请查看日志确认 yt-dlp 输出。"))
+                    self.log_queue.put(("error", "下载命令已结束，但本次没有生成新视频文件。为避免误用旧文件，ACAN Studio 已停止后续处理；请查看日志确认 yt-dlp 输出。"))
                     return
+
+                expected_duration = self._extract_expected_duration(output)
+                if expected_duration:
+                    try:
+                        actual_duration = self._get_video_duration_seconds(downloaded_path, tool_paths["ffprobe"])
+                    except Exception as exc:
+                        self.log_queue.put(("log", f"视频完整性校验暂时无法完成：{exc}"))
+                    else:
+                        tolerance = max(15.0, expected_duration * 0.02)
+                        if actual_duration + tolerance < expected_duration:
+                            downloaded_path = self._mark_incomplete_download(downloaded_path, actual_duration)
+                            expected_text = self._format_duration(expected_duration)
+                            actual_text = self._format_duration(actual_duration)
+                            self.log_queue.put(("log", f"完整性校验失败：页面时长 {expected_text}，下载文件仅 {actual_text}"))
+                            if platform_name == "芒果TV" and actual_duration <= 330 and expected_duration >= 600:
+                                message = (
+                                    f"芒果TV只返回了 {actual_text} 的试看流，完整视频应为 {expected_text}。\n\n"
+                                    "该文件已保留并标记为不完整，程序不会继续把它当作完整视频处理。"
+                                    "请在设置中启用已登录且拥有播放权限的浏览器 Cookie，或导入 Cookies.txt 后重试。"
+                                    "如果仍然只有试看时长，说明平台没有向下载器提供完整流，ACAN Studio 不能绕过会员或版权保护。"
+                                )
+                            else:
+                                message = (
+                                    f"下载文件不完整：页面时长 {expected_text}，实际文件仅 {actual_text}。\n\n"
+                                    "文件已保留并标记为不完整，请检查网络、登录状态后重新下载。"
+                                )
+                            self.log_queue.put(("error", message))
+                            return
 
                 self.log_queue.put(("log", f"下载完成文件：{downloaded_path}"))
 
@@ -1070,6 +1129,15 @@ class ACANCreatorApp(ctk.CTk):
             return_code, output = self._run_command_with_log(command)
             if output:
                 all_outputs.append(output)
+            if platform_name == "芒果TV" and stage == "下载" and self._is_mgtv_svip_access_filtered(output):
+                message = (
+                    "该视频当前是“SVIP限时抢先看”，Chrome 登录账号没有本片所需的完整播放权限。\n\n"
+                    "ACAN Studio 已在下载前停止，不会再保存2分钟试看文件。"
+                    "请使用拥有SVIP抢先看权益的账号，或等抢先看期结束后重试。"
+                    "程序不能绕过会员、付费或版权权限。"
+                )
+                self.log_queue.put(("error", message))
+                return False, "\n".join(all_outputs).strip()
             if return_code == 0:
                 self.log_queue.put(("progress", {"percent": 100, "speed": "", "eta": ""}))
                 return True, "\n".join(all_outputs).strip()
@@ -1092,6 +1160,58 @@ class ACANCreatorApp(ctk.CTk):
             return False, combined_output
 
         return False, "\n".join(all_outputs).strip()
+
+    @staticmethod
+    def _extract_expected_duration(output):
+        matches = list(YTDLP_EXPECTED_DURATION_PATTERN.finditer(output or ""))
+        if not matches:
+            return None
+        try:
+            duration = float(matches[-1].group("duration"))
+        except (TypeError, ValueError):
+            return None
+        return duration if duration > 0 else None
+
+    @staticmethod
+    def _extract_downloaded_file(output, destination_dir):
+        matches = list(YTDLP_DOWNLOADED_FILE_PATTERN.finditer(output or ""))
+        if not matches:
+            return None
+
+        candidate = Path(matches[-1].group("path").strip()).expanduser()
+        try:
+            candidate = candidate.resolve()
+            destination_dir = Path(destination_dir).expanduser().resolve()
+        except OSError:
+            return None
+
+        video_suffixes = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+        if not candidate.is_relative_to(destination_dir):
+            return None
+        if candidate.suffix.lower() not in video_suffixes or not candidate.is_file():
+            return None
+        return candidate
+
+    @staticmethod
+    def _is_mgtv_svip_access_filtered(output):
+        output = output or ""
+        return "does not pass filter" in output and MGTV_SVIP_FILTERS[-1] in output
+
+    @staticmethod
+    def _mark_incomplete_download(video_path, actual_duration):
+        video_path = Path(video_path)
+        if re.search(r"_INCOMPLETE_\d+s(?:_\d+)?$", video_path.stem):
+            return video_path
+        seconds = max(0, int(round(actual_duration)))
+        candidate = video_path.with_name(f"{video_path.stem}_INCOMPLETE_{seconds}s{video_path.suffix}")
+        index = 2
+        while candidate.exists():
+            candidate = video_path.with_name(f"{video_path.stem}_INCOMPLETE_{seconds}s_{index}{video_path.suffix}")
+            index += 1
+        try:
+            return video_path.rename(candidate)
+        except OSError:
+            return video_path
 
     def _run_command_with_log(self, command):
         output_lines = []
@@ -1371,7 +1491,10 @@ class ACANCreatorApp(ctk.CTk):
             from faster_whisper import WhisperModel
 
             if not hasattr(ACANCreatorApp, "_faster_whisper_model"):
-                ACANCreatorApp._faster_whisper_model = WhisperModel("base", device="auto", compute_type="int8")
+                bundled_model = ACANCreatorApp._bundled_whisper_model_dir()
+                model_source = str(bundled_model) if bundled_model else "base"
+                self.log_queue.put(("log", f"语音识别模型：{'内置 base 模型' if bundled_model else 'base 模型'}"))
+                ACANCreatorApp._faster_whisper_model = WhisperModel(model_source, device="cpu", compute_type="int8")
 
             self.log_queue.put(("log", "识别进度：正在自动识别语言，中文内容会自动识别"))
             segments, info = ACANCreatorApp._faster_whisper_model.transcribe(
@@ -1498,6 +1621,20 @@ class ACANCreatorApp(ctk.CTk):
             return 0.0
 
     def _recognize_frame_text(self, frame, ocr_engine, image_module):
+        if ocr_engine["kind"] == "vision":
+            result = subprocess.run(
+                [ocr_engine["path"], str(frame)],
+                capture_output=True,
+                text=True,
+                timeout=90,
+                env=self._command_environment(),
+                check=False,
+            )
+            if result.returncode != 0:
+                reason = (result.stderr or result.stdout or "macOS Vision OCR 未返回错误详情").strip()
+                raise RuntimeError(f"macOS Vision OCR 识别失败：{reason}")
+            return result.stdout
+
         if ocr_engine["kind"] == "paddle":
             return self._recognize_frame_with_paddle(frame)
 
@@ -1636,12 +1773,12 @@ class ACANCreatorApp(ctk.CTk):
             else:
                 self._write_log("Cookies.txt：未找到，请重新导入文件")
         elif cookie_source == "浏览器" and self.settings.get("use_browser_cookie", False):
-            cookie_paths = self._chrome_cookie_paths()
-            readable_cookies = [path for path in cookie_paths if path.exists() and os.access(path, os.R_OK)]
-            if readable_cookies:
-                self._write_log("Chrome Cookie：可读取")
+            browser_label = self.settings.get("browser", "自动")
+            display_name = "Chrome" if browser_label == "自动" else browser_label
+            if self._browser_available(browser_label):
+                self._write_log(f"{display_name} Cookie：已启用，将在下载时验证登录状态")
             else:
-                self._write_log("Chrome Cookie：未检测到可读取 Cookie。请确认已安装 Chrome 并登录相关平台。")
+                self._write_log(f"{display_name} Cookie：已启用，但未检测到该浏览器")
         else:
             self._write_log("Cookie：未启用（可在设置中主动开启）")
 
@@ -1651,20 +1788,36 @@ class ACANCreatorApp(ctk.CTk):
 
     def refresh_cookie_status(self):
         self._write_log("正在重新读取 Cookie 状态...")
+        cookie_source = self.settings.get("cookie_source", "不使用")
+        if cookie_source == "不使用" or (
+            cookie_source == "浏览器" and not self.settings.get("use_browser_cookie", False)
+        ):
+            message = "Cookie 当前未启用。这是可选功能，不会影响公开视频下载；需要登录下载时再到设置中开启。"
+            self._write_log(message)
+            self._show_info(message)
+            return
+
+        if cookie_source == "浏览器":
+            browser_label = self.settings.get("browser", "自动")
+            display_name = "Chrome" if browser_label == "自动" else browser_label
+            if self._browser_available(browser_label):
+                message = f"{display_name} Cookie 已启用。具体登录权限会在下载时验证。"
+                self._write_log(message)
+                self._show_info(message)
+            else:
+                message = f"未检测到 {display_name}，请安装或在设置中选择其他浏览器。"
+                self._write_log(message)
+                self._show_error(message)
+            return
+
         cookie_status = self._cookie_status_ok()
         if cookie_status:
-            cookie_source = self.settings.get("cookie_source", "不使用")
             if cookie_source == "Cookies.txt":
                 self._write_log("Cookies.txt：可读取")
                 self._show_info("Cookies.txt 可读取。请确认文件来自你有权使用的账号。")
-            else:
-                self._write_log("Chrome Cookie：可读取")
-                self._show_info("Chrome Cookie 可读取。请确认对应平台网页版已登录。")
         else:
             if self.settings.get("cookie_source") == "Cookies.txt":
                 message = "未找到可读取的 Cookies.txt，请在设置中重新导入文件。"
-            elif self.settings.get("cookie_source") == "浏览器":
-                message = "当前平台登录状态可能已失效，请在 Mac 的 Chrome 中登录对应平台网页版，浏览几个视频后重试。"
             else:
                 message = "当前未启用 Cookie。需要登录下载时，请在设置中选择浏览器或导入 Cookies.txt。"
             self._write_log(f"中文建议：{message}")
@@ -3207,12 +3360,22 @@ class ACANCreatorApp(ctk.CTk):
         except OSError:
             add_check(False, "下载目录", "下载目录无法创建或访问")
 
+        cookie_source = self.settings.get("cookie_source", "不使用")
         browser_label = self.settings.get("browser", "自动")
-        browser_ok = self._browser_available(browser_label)
-        add_check(browser_ok, browser_label if browser_label != "自动" else "Chrome", "浏览器未检测到")
-
-        cookie_status = self._cookie_status_ok()
-        add_check(cookie_status, "Chrome Cookie" if cookie_status else "Chrome Cookie 未检测", "Chrome Cookie 未检测")
+        if cookie_source == "Cookies.txt":
+            cookies_txt = self.settings.get("cookies_txt", "").strip()
+            cookie_status = bool(cookies_txt and Path(cookies_txt).expanduser().is_file())
+            add_check(cookie_status, "Cookies.txt 可读取" if cookie_status else "Cookies.txt 未找到", "Cookies.txt 未找到")
+        elif cookie_source == "浏览器" and self.settings.get("use_browser_cookie", False):
+            display_name = "Chrome" if browser_label == "自动" else browser_label
+            browser_ok = self._browser_available(browser_label)
+            add_check(
+                browser_ok,
+                f"{display_name} Cookie 已启用（下载时验证）" if browser_ok else f"{display_name} 未检测到",
+                f"{display_name} 未检测到",
+            )
+        else:
+            add_check(True, "Cookie 未启用（可选）")
 
         env_text = "环境检查\n" + "    ".join(checks)
         self.env_label.configure(text=env_text)
@@ -3227,6 +3390,7 @@ class ACANCreatorApp(ctk.CTk):
         candidates = {
             "自动": ["/Applications/Google Chrome.app"],
             "Chrome": ["/Applications/Google Chrome.app"],
+            "Safari": ["/Applications/Safari.app", "/System/Applications/Safari.app"],
             "Edge": ["/Applications/Microsoft Edge.app"],
             "Firefox": ["/Applications/Firefox.app"],
         }
@@ -3298,6 +3462,14 @@ class ACANCreatorApp(ctk.CTk):
         return None
 
     @classmethod
+    def _bundled_whisper_model_dir(cls):
+        for root in cls._embedded_resource_roots():
+            candidate = root / EMBEDDED_MODEL_DIR_NAME / FASTER_WHISPER_MODEL_DIR_NAME
+            if candidate.is_dir() and (candidate / "model.bin").is_file():
+                return candidate
+        return None
+
+    @classmethod
     def _configure_embedded_environment(cls):
         tool_dirs = []
         for root in cls._embedded_resource_roots():
@@ -3330,6 +3502,10 @@ class ACANCreatorApp(ctk.CTk):
         return None
 
     def _detect_ocr_engine(self):
+        vision_path = self._find_tool("acan-vision-ocr") if sys.platform == "darwin" else None
+        if vision_path:
+            return {"kind": "vision", "name": "macOS Vision（内置）", "path": vision_path}
+
         if self._paddleocr_available():
             return {"kind": "paddle", "name": "PaddleOCR", "path": ""}
 
@@ -3388,7 +3564,9 @@ class ACANCreatorApp(ctk.CTk):
     @staticmethod
     def _detect_transcript_engine():
         if ACANCreatorApp._faster_whisper_available():
-            return {"kind": "faster-whisper", "name": "faster-whisper"}
+            bundled = ACANCreatorApp._bundled_whisper_model_dir()
+            name = "faster-whisper（内置模型）" if bundled else "faster-whisper"
+            return {"kind": "faster-whisper", "name": name}
 
         whisper_cli = ACANCreatorApp._project_whisper_cli() or shutil.which("whisper")
         if whisper_cli:
@@ -3400,6 +3578,11 @@ class ACANCreatorApp(ctk.CTk):
 
     def _log_ocr_engine_status(self):
         self._write_log("OCR 引擎：")
+        vision_path = self._find_tool("acan-vision-ocr") if sys.platform == "darwin" else None
+        if vision_path:
+            self._write_log(f"✓ macOS Vision（内置：{vision_path}）")
+            return
+
         if self._paddleocr_available():
             self._write_log("✓ PaddleOCR")
             return
@@ -3523,7 +3706,6 @@ class ACANCreatorApp(ctk.CTk):
 
         video_suffixes = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
         ignored_suffixes = {".part", ".ytdl", ".tmp", ".ds_store"}
-        all_video_candidates = []
         recent_candidates = []
 
         for path in folder.rglob("*"):
@@ -3540,18 +3722,12 @@ class ACANCreatorApp(ctk.CTk):
             except OSError:
                 continue
 
-            all_video_candidates.append((modified_at, path))
-
             if modified_at >= started_at - 3:
                 recent_candidates.append((modified_at, path))
 
         if recent_candidates:
             recent_candidates.sort(reverse=True)
             return recent_candidates[0][1]
-
-        if all_video_candidates:
-            all_video_candidates.sort(reverse=True)
-            return all_video_candidates[0][1]
 
         return None
 

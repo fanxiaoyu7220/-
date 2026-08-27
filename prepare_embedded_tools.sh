@@ -3,45 +3,132 @@ set -e
 
 cd "$(dirname "$0")"
 
-PYTHON_BIN=".venv/bin/python"
+PYTHON_BIN="${ACAN_PYTHON_BIN:-.venv/bin/python}"
+REQUIREMENTS_FILE="${ACAN_REQUIREMENTS_FILE:-requirements.txt}"
 BUNDLE_ROOT="$PWD/.pyinstaller-cache/embedded-tools"
 YTDLP_ENTRY="$PWD/packaging/yt_dlp_entry.py"
 YTDLP_BUILD_DIR="$PWD/.pyinstaller-cache/yt-dlp-tool-build"
+YTDLP_PATCH="$PWD/patches/yt-dlp-2026.08.19-mgtv-web-player.patch"
+WHISPER_MODEL_DIR="$PWD/.pyinstaller-cache/models/faster-whisper-base"
+TARGET_ARCH="${ACAN_TARGET_ARCH:-$(uname -m)}"
+VISION_OCR_SOURCE="$PWD/packaging/acan_vision_ocr.swift"
+PYINSTALLER_RUNNER="$PWD/packaging/run_pyinstaller.py"
+PORTABLE_FFMPEG_RELEASE="b6.1.1"
+PORTABLE_TOOLS_CACHE="$PWD/.pyinstaller-cache/portable-tools/$PORTABLE_FFMPEG_RELEASE/$TARGET_ARCH"
+export MACOSX_DEPLOYMENT_TARGET="${ACAN_MACOSX_DEPLOYMENT_TARGET:-11.0}"
+
+download_verified_asset() {
+  local asset_name="$1"
+  local expected_sha256="$2"
+  local destination="$PORTABLE_TOOLS_CACHE/$asset_name"
+
+  if [ -f "$destination" ]; then
+    local existing_sha256
+    existing_sha256="$(shasum -a 256 "$destination" | awk '{print $1}')"
+    if [ "$existing_sha256" = "$expected_sha256" ]; then
+      return
+    fi
+    mv "$destination" "$destination.invalid.$(date +%Y%m%d%H%M%S)"
+  fi
+
+  local temporary_download="$destination.download.$RANDOM"
+  curl --http1.1 --retry 5 --retry-all-errors --fail --location --silent --show-error \
+    -o "$temporary_download" \
+    "https://github.com/eugeneware/ffmpeg-static/releases/download/$PORTABLE_FFMPEG_RELEASE/$asset_name"
+
+  local actual_sha256
+  actual_sha256="$(shasum -a 256 "$temporary_download" | awk '{print $1}')"
+  if [ "$actual_sha256" != "$expected_sha256" ]; then
+    echo "下载校验失败：$asset_name"
+    echo "期望：$expected_sha256"
+    echo "实际：$actual_sha256"
+    exit 1
+  fi
+  mv "$temporary_download" "$destination"
+}
 
 if [ ! -x "$PYTHON_BIN" ]; then
+  if [ -n "${ACAN_PYTHON_BIN:-}" ]; then
+    echo "打包失败：指定的 Python 不可执行：$PYTHON_BIN"
+    exit 1
+  fi
   python3 -m venv .venv
 fi
 
-"$PYTHON_BIN" -m pip install --disable-pip-version-check -r requirements.txt
+"$PYTHON_BIN" -m pip install --disable-pip-version-check -r "$REQUIREMENTS_FILE"
 
-if ! command -v dylibbundler >/dev/null 2>&1; then
-  echo "缺少 dylibbundler。请先运行：brew install dylibbundler"
+YTDLP_PACKAGE_DIR="$("$PYTHON_BIN" -c 'import os, yt_dlp; print(os.path.dirname(yt_dlp.__file__))')"
+YTDLP_MGTV_EXTRACTOR="$YTDLP_PACKAGE_DIR/extractor/mgtv.py"
+if [ ! -f "$YTDLP_PATCH" ]; then
+  echo "缺少芒果TV兼容补丁：$YTDLP_PATCH"
   exit 1
 fi
 
-if ! command -v brew >/dev/null 2>&1; then
-  echo "缺少 Homebrew。构建内置工具需要 Homebrew 提供本机版本的音视频和 OCR 工具。"
+echo "正在应用芒果TV会员流兼容补丁..."
+if grep -q "f'did={did}|pno=1030" "$YTDLP_MGTV_EXTRACTOR" && \
+   grep -q "'definitionType': '2'" "$YTDLP_MGTV_EXTRACTOR" && \
+   grep -q "'mgtv_access_hint':" "$YTDLP_MGTV_EXTRACTOR"; then
+  echo "芒果TV兼容补丁已经应用，继续构建。"
+elif /usr/bin/patch -N -t -p0 -d "$YTDLP_PACKAGE_DIR" -i "$YTDLP_PATCH"; then
+  :
+else
+  echo "无法应用芒果TV兼容补丁；请确认 $REQUIREMENTS_FILE 中的 yt-dlp 版本未被修改。"
   exit 1
 fi
 
-TESSERACT_LANG_PREFIX="$(brew --prefix tesseract-lang 2>/dev/null || true)"
-if [ -z "$TESSERACT_LANG_PREFIX" ] || [ ! -f "$TESSERACT_LANG_PREFIX/share/tessdata/chi_sim.traineddata" ]; then
-  echo "缺少中文 OCR 数据。请先运行：brew install tesseract-lang"
-  exit 1
+if [ ! -f "$WHISPER_MODEL_DIR/model.bin" ]; then
+  echo "正在下载 faster-whisper base 多语言模型..."
+  mkdir -p "$WHISPER_MODEL_DIR"
+  "$PYTHON_BIN" -c 'import sys; from huggingface_hub import snapshot_download; snapshot_download(repo_id="Systran/faster-whisper-base", local_dir=sys.argv[1])' "$WHISPER_MODEL_DIR"
 fi
 
-for tool_name in ffmpeg ffprobe tesseract; do
-  if ! command -v "$tool_name" >/dev/null 2>&1; then
-    echo "缺少 $tool_name。请先安装后再构建。"
+case "$TARGET_ARCH" in
+  arm64)
+    FFMPEG_ASSET="ffmpeg-darwin-arm64"
+    NOTICE_ASSET="darwin-arm64.README"
+    LICENSE_ASSET="darwin-arm64.LICENSE"
+    FFMPEG_SHA256="a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584"
+    NOTICE_SHA256="05ba4b92c96605434b1aaae3eedf5a2c280c9607bf78ffca9a5b536d9af2dc6a"
+    LICENSE_SHA256="cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2"
+    ;;
+  x86_64)
+    FFMPEG_ASSET="ffmpeg-darwin-x64"
+    NOTICE_ASSET="darwin-x64.README"
+    LICENSE_ASSET="darwin-x64.LICENSE"
+    FFMPEG_SHA256="ebdddc936f61e14049a2d4b549a412b8a40deeff6540e58a9f2a2da9e6b18894"
+    NOTICE_SHA256="e88a0325f8e5b75210355e37341824f074d3cd82def2125be54c914b62848a36"
+    LICENSE_SHA256="2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
+    ;;
+  *)
+    echo "不支持的目标架构：$TARGET_ARCH"
     exit 1
-  fi
-done
+    ;;
+esac
+
+mkdir -p "$PORTABLE_TOOLS_CACHE"
+echo "正在准备已校验的静态 ffmpeg/ffprobe（$TARGET_ARCH）..."
+download_verified_asset "$FFMPEG_ASSET" "$FFMPEG_SHA256"
+download_verified_asset "$NOTICE_ASSET" "$NOTICE_SHA256"
+download_verified_asset "$LICENSE_ASSET" "$LICENSE_SHA256"
+PORTABLE_FFPROBE_PATH="$(./packaging/build_portable_ffprobe.sh "$TARGET_ARCH" "$MACOSX_DEPLOYMENT_TARGET")"
 
 rm -rf "$BUNDLE_ROOT" "$YTDLP_BUILD_DIR"
-mkdir -p "$BUNDLE_ROOT/tools" "$BUNDLE_ROOT/tessdata"
+mkdir -p "$BUNDLE_ROOT/tools" "$BUNDLE_ROOT/licenses"
+
+if [ ! -f "$VISION_OCR_SOURCE" ]; then
+  echo "缺少 macOS Vision OCR 源码：$VISION_OCR_SOURCE"
+  exit 1
+fi
+
+echo "正在生成内置 macOS Vision OCR（$TARGET_ARCH，macOS $MACOSX_DEPLOYMENT_TARGET+）..."
+xcrun swiftc \
+  -O \
+  -target "${TARGET_ARCH}-apple-macos${MACOSX_DEPLOYMENT_TARGET}" \
+  "$VISION_OCR_SOURCE" \
+  -o "$BUNDLE_ROOT/tools/acan-vision-ocr"
 
 echo "正在生成独立 yt-dlp..."
-"$PYTHON_BIN" -m PyInstaller \
+YTDLP_PYINSTALLER_ARGS=(
   --onefile \
   --noconfirm \
   --clean \
@@ -49,39 +136,27 @@ echo "正在生成独立 yt-dlp..."
   --distpath "$BUNDLE_ROOT/tools" \
   --workpath "$YTDLP_BUILD_DIR" \
   --specpath "$PWD/.pyinstaller-cache" \
-  --collect-all yt_dlp \
-  "$YTDLP_ENTRY"
+  --collect-all yt_dlp
+  --target-arch "$TARGET_ARCH"
+)
 
-for tool_name in ffmpeg ffprobe tesseract; do
-  cp -L "$(command -v "$tool_name")" "$BUNDLE_ROOT/tools/$tool_name"
-  chmod +x "$BUNDLE_ROOT/tools/$tool_name"
-done
+if [ -n "${ACAN_PYTHON_LIBRARY_DIR:-}" ]; then
+  for ssl_library in libssl.3.dylib libcrypto.3.dylib; do
+    ssl_library_path="$ACAN_PYTHON_LIBRARY_DIR/$ssl_library"
+    if [ ! -f "$ssl_library_path" ]; then
+      echo "打包失败：缺少 Python HTTPS 运行库 $ssl_library_path"
+      exit 1
+    fi
+    YTDLP_PYINSTALLER_ARGS+=("--add-binary=${ssl_library_path}:.")
+  done
+fi
+"$PYTHON_BIN" "$PYINSTALLER_RUNNER" "${YTDLP_PYINSTALLER_ARGS[@]}" "$YTDLP_ENTRY"
 
-SEARCH_ARGS=()
-while IFS= read -r search_path; do
-  SEARCH_ARGS+=(-s "$search_path")
-done < <(find -L /opt/homebrew/opt /opt/homebrew/Cellar -type d -name lib 2>/dev/null)
-
-mkdir -p "$BUNDLE_ROOT/tools/lib"
-for tool_name in ffmpeg ffprobe tesseract; do
-  echo "正在收集 $tool_name 的动态库..."
-  dylibbundler \
-    -cd \
-    -b \
-    -of \
-    -x "$BUNDLE_ROOT/tools/$tool_name" \
-    -d "$BUNDLE_ROOT/tools/lib" \
-    -p "@loader_path/../lib" \
-    "${SEARCH_ARGS[@]}"
-done
-
-TESSERACT_DATA_DIR="$(brew --prefix tesseract)/share/tessdata"
-for language_file in eng.traineddata osd.traineddata snum.traineddata; do
-  cp -L "$TESSERACT_DATA_DIR/$language_file" "$BUNDLE_ROOT/tessdata/"
-done
-cp -L "$TESSERACT_LANG_PREFIX/share/tessdata/chi_sim.traineddata" "$BUNDLE_ROOT/tessdata/"
-cp -R "$TESSERACT_DATA_DIR/configs" "$BUNDLE_ROOT/tessdata/"
-cp -R "$TESSERACT_DATA_DIR/tessconfigs" "$BUNDLE_ROOT/tessdata/"
+cp -L "$PORTABLE_TOOLS_CACHE/$FFMPEG_ASSET" "$BUNDLE_ROOT/tools/ffmpeg"
+cp -L "$PORTABLE_FFPROBE_PATH" "$BUNDLE_ROOT/tools/ffprobe"
+cp -L "$PORTABLE_TOOLS_CACHE/$NOTICE_ASSET" "$BUNDLE_ROOT/licenses/ffmpeg-static.README"
+cp -L "$PORTABLE_TOOLS_CACHE/$LICENSE_ASSET" "$BUNDLE_ROOT/licenses/ffmpeg-static.LICENSE"
+chmod +x "$BUNDLE_ROOT/tools/ffmpeg" "$BUNDLE_ROOT/tools/ffprobe"
 
 if command -v xattr >/dev/null 2>&1; then
   xattr -cr "$BUNDLE_ROOT" || true

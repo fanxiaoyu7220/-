@@ -4,10 +4,13 @@ The optional embedded-runtime DMG includes third-party command-line tools. They
 remain under their own licenses and are not relicensed by ACAN Studio.
 
 - yt-dlp: Unlicense. Project: <https://github.com/yt-dlp/yt-dlp>
-- FFmpeg: GPL-3.0-or-later for the Homebrew build used by the packaging script.
-  Project and source: <https://ffmpeg.org/>
-- Tesseract OCR: Apache-2.0. Project: <https://github.com/tesseract-ocr/tesseract>
-- Tesseract language data: Apache-2.0. Project: <https://github.com/tesseract-ocr/tessdata_fast>
+- FFmpeg/FFprobe: GPL-3.0-or-later static builds distributed by ffmpeg-static.
+  Project and source: <https://ffmpeg.org/>. Binary build project:
+  <https://github.com/eugeneware/ffmpeg-static>. The exact binary README and
+  license are included in the app's `licenses` directory.
+- faster-whisper: MIT. Project: <https://github.com/SYSTRAN/faster-whisper>
+- CTranslate2: MIT. Project: <https://github.com/OpenNMT/CTranslate2>
+- faster-whisper base model: MIT. Project: <https://huggingface.co/Systran/faster-whisper-base>
 
-The exact versions bundled into a build are recorded by the build machine's
-Homebrew and Python package versions. Rebuild the DMG when updating these tools.
+ACAN Studio uses Apple's built-in Vision framework for OCR on macOS; no separate
+OCR executable or Homebrew installation is needed in the compatibility build.

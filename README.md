@@ -111,7 +111,7 @@ Creator/
 brew install yt-dlp ffmpeg tesseract
 ```
 
-使用已经构建好的 DMG 时，`yt-dlp`、`ffmpeg`、`ffprobe`、`tesseract` 和中英文 OCR 数据会随应用一起提供，不需要在朋友的 Mac 上安装 Homebrew。Whisper / faster-whisper 仍然是可选功能，未放入默认 DMG，以免安装包过大。
+使用已经构建好的兼容版 DMG 时，`yt-dlp`、`ffmpeg`、`ffprobe`、macOS 原生 Vision OCR、`faster-whisper` 和 base 多语言模型会随应用一起提供，不需要在朋友的 Mac 上安装 Homebrew，也不需要首次使用时另行下载语音模型。
 
 首次启动时，如果检测到 OCR 或 Whisper 缺失，会显示安装向导。点击“一键安装”会后台执行：
 
@@ -193,27 +193,30 @@ dist/ACAN Studio.app
 
 ## 生成可下载的 DMG
 
-如果想给别人提供一个可以下载的安装镜像，在项目目录运行：
+发布版分别为 Apple Silicon 和 Intel Mac 构建，支持 macOS 12 及以上版本。在项目目录运行：
 
 ```bash
-chmod +x build_dmg.sh
-./build_dmg.sh
+chmod +x build_macos_compat_dmg.sh
+./build_macos_compat_dmg.sh arm64
+./build_macos_compat_dmg.sh x86_64
 ```
 
-完成后会生成：
+完成后会同时保留两个安装包：
 
 ```text
-dist/ACAN-Studio-1.1.0.dmg
+dist/ACAN-Studio-1.1.7-arm64.dmg
+dist/ACAN-Studio-1.1.7-x86_64.dmg
 ```
 
-打开 DMG 后，把 `ACAN Studio.app` 拖到 `Applications` 文件夹即可。
+M1、M2、M3、M4、M5 等 Apple 芯片 Mac 下载 `arm64` 版；使用 Intel 处理器的 Mac 下载 `x86_64` 版。打开 DMG 后，把 `ACAN Studio.app` 拖到 `Applications` 文件夹即可。
 
-当前 DMG 会把下载、转码和 OCR 所需的后台工具及第三方许可说明一起打进应用。它仍是测试版，尚未使用 Apple Developer ID 签名和公证；朋友第一次打开时，如果 macOS 提示无法验证开发者，可以右键点击应用，选择“打开”后再确认。
+当前 DMG 会把下载、转码、OCR 和语音识别所需的后台工具及第三方许可说明一起打进应用，并执行本地完整性签名。它仍是测试版，尚未使用 Apple Developer ID 签名和公证；朋友第一次打开时，如果 macOS 提示无法验证开发者，可以右键点击应用，选择“打开”后再确认。
 
-构建内置工具需要在制作者的 Mac 上准备 Homebrew、`dylibbundler` 和 `tesseract-lang`：
+兼容版构建需要 Xcode Command Line Tools 和网络连接。Intel 版在 Apple Silicon Mac 上构建时，还需要苹果官方 Rosetta 2：
 
 ```bash
-brew install dylibbundler tesseract-lang
+xcode-select --install
+softwareupdate --install-rosetta --agree-to-license
 ```
 
 ## 说明
@@ -226,6 +229,9 @@ brew install dylibbundler tesseract-lang
 - 如果视频没有字幕，应用会提示使用“音频转文字”识别语音内容。
 - 默认不会读取浏览器 Cookie。需要登录的平台，请在“设置”中主动选择“浏览器”，或手动导入 `Cookies.txt`。
 - 如果提示 Cookie 或 JSON 解析问题，请打开对应平台的网页版并确认已登录，必要时运行 `yt-dlp -U` 更新下载器。
+- 芒果TV会员内容会使用当前网页播放器所需的设备与会话参数读取已登录账号有权限播放的清晰度；如果平台仍只返回约5分钟试看流，ACAN Studio 会比较页面标称时长与实际文件时长，保留并标记为 `INCOMPLETE`，不会误报为完整下载。此功能不会绕过会员、付费或版权权限。
+- 芒果TV标记为“SVIP限时抢先看”的内容会在下载前检查当前账号权限；权限不足时直接停止并提示，不再下载2分钟试看文件。
+- 下载器发现目标视频已经存在时，会根据 yt-dlp 返回的精确文件路径校验同一个视频，不会再回退误选目录里的其他旧视频。
 - 如果抖音出现 `Fresh cookies are needed` 或 `Failed to parse JSON`，说明链接已成功识别，但当前 yt-dlp 可能无法解析抖音接口数据；请稍后更新 yt-dlp 后重试，或使用后续备用下载方案。
 - 小红书如果需要登录，请在 Mac 的 Chrome 中登录小红书网页版；手机 App 登录状态不能被电脑读取。
 - 抖音精选页链接如 `https://www.douyin.com/jingxuan?modal_id=...` 会直接提示用户进入具体视频页面后使用“分享 → 复制链接”，不会继续交给 yt-dlp。

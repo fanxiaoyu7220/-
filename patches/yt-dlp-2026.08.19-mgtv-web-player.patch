@@ -1,0 +1,62 @@
+--- extractor/mgtv.py
++++ extractor/mgtv.py
+@@ -78,10 +78,22 @@
+     def _real_extract(self, url):
+         video_id = self._match_id(url)
++        browser_cookies = self._get_cookies('https://www.mgtv.com')
++        did = try_call(lambda: browser_cookies['mba_deviceid'].value) or uuid.uuid4().hex
++        cxid = try_call(lambda: browser_cookies['mba_cxid'].value) or ''
++        suuid = uuid.uuid4().hex
+         tk2 = base64.urlsafe_b64encode(
+-            f'did={uuid.uuid4()}|pno=1030|ver=0.3.0301|clit={int(time.time())}'.encode())[::-1]
++            f'did={did}|pno=1030|ver=0.3.0301|clit={int(time.time())}'.encode())[::-1]
+         try:
+             api_data = self._download_json(
+                 'https://pcweb.api.mgtv.com/player/video', video_id, query={
++                    '_support': '10000000',
++                    'allowedRC': '1',
++                    'auth_mode': '1',
++                    'cxid': cxid,
++                    'did': did,
++                    'entranceType': '0',
++                    'src': 'intelmgtv',
++                    'suuid': suuid,
+                     'tk2': tk2,
+                     'video_id': video_id,
+                     'type': 'pch5',
+@@ -97,15 +109,17 @@
+         stream_data = self._download_json(
+-            'https://tinker.glb.mgtv.com/player/getSource', video_id, query={
++            'https://pcweb.api.mgtv.com/player/getSource', video_id, query={
+                 '_support': '10000000',
++                'allowedRC': '1',
++                'auth_mode': '1',
++                'cxid': cxid,
++                'definitionType': '2',
++                'did': did,
++                'entranceType': '0',
++                'suuid': suuid,
+                 'tk2': tk2,
+                 'pm2': api_data['atc']['pm2'],
+                 'video_id': video_id,
+                 'type': 'pch5',
+-                'auth_mode': '1',
+-                'cxid': '',
+-                'supportMse': '1',
+-                'src': 'intelmgtv',
+-                'abroad': try_call(lambda: self._get_cookies('https://www.mgtv.com')['abroad'].value) or '10',
+-                'allowedRC': '1',
++                'vf': 'h264',
+             }, headers=self.geo_verification_headers())['data']
+         stream_domain = traverse_obj(stream_data, ('stream_domain', ..., {url_or_none}), get_all=False)
+@@ -142,6 +156,10 @@
+         return {
+             'id': video_id,
+             'formats': formats,
++            'mgtv_purview': traverse_obj(api_data, ('user', 'purview', {str})),
++            'mgtv_access_hint': traverse_obj(
++                api_data, ('info', 'authInfo', 'pay_info', 'preview_end',
++                           'components', ..., 'text', {str.strip}), get_all=False),
+             **traverse_obj(api_data, ('info', {
+                 'title': ('title', {str.strip}),
+                 'description': ('desc', {str}),

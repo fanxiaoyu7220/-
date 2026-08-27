@@ -1,2 +1,5 @@
 from yt_dlp import main
-main()
+
+
+if __name__ == "__main__":
+    main()
