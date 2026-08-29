@@ -758,12 +758,23 @@ class ACANCreatorApp(ctk.CTk):
                 return engine
         return engines[0]
 
+    def _youtube_javascript_args(self, platform):
+        if platform["name"] != "YouTube":
+            return []
+
+        deno_path = self._find_tool("deno")
+        if not deno_path:
+            return []
+        return ["--js-runtimes", f"deno:{deno_path}"]
+
     def _build_yt_dlp_download_attempts(self, platform, url, destination_dir, engine):
         # Include the platform video ID so episodes with the same title/date do
         # not collide. This is especially important for MangoTV program pages.
         output_template = str(destination_dir / "%(uploader|未知作者).100B" / "%(upload_date|未知日期)s_%(title).200B_[%(id|未知ID)s].%(ext)s")
+        javascript_args = self._youtube_javascript_args(platform)
         base_command = [
             "yt-dlp",
+            *javascript_args,
             "--merge-output-format",
             "mp4",
             "--no-mtime",
@@ -838,8 +849,10 @@ class ACANCreatorApp(ctk.CTk):
 
     def _build_subtitle_attempts(self, platform, url, subtitle_dir):
         subtitle_template = str(subtitle_dir / "%(uploader|未知作者).100B" / "%(upload_date|未知日期)s_%(title).200B.%(ext)s")
+        javascript_args = self._youtube_javascript_args(platform)
         base_command = [
             "yt-dlp",
+            *javascript_args,
             "--skip-download",
             "--write-subs",
             "--write-auto-subs",
@@ -939,6 +952,8 @@ class ACANCreatorApp(ctk.CTk):
             return
 
         required_tools = ["yt-dlp"]
+        if platform["name"] == "YouTube":
+            required_tools.append("deno")
         if self._mode_needs_download(mode):
             required_tools.append("ffprobe")
         should_fix = self._mode_needs_fix(mode) or (platform["name"] == "YouTube" and mode == "下载视频")
@@ -960,6 +975,8 @@ class ACANCreatorApp(ctk.CTk):
             message = "执行前检查发现缺少依赖：\n" + "\n".join(f"• {item}" for item in missing)
             if "tesseract" in missing:
                 message += "\n\nOCR 需要先安装 Tesseract OCR。"
+            if "deno" in missing:
+                message += "\n\nYouTube 新版播放器需要 Deno JavaScript 运行时。请安装最新版 ACAN Studio，或在源码运行环境中安装 Deno。"
             self._write_log(message)
             self._show_error(message)
             return
@@ -1290,6 +1307,20 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _platform_stage_suggestion(platform_name, stage, output):
+        if platform_name == "YouTube":
+            normalized_output = (output or "").lower()
+            javascript_error_tokens = (
+                "n challenge solving failed",
+                "supported javascript runtime",
+                "challenge solver script distribution",
+                "the page needs to be reloaded",
+            )
+            if any(token in normalized_output for token in javascript_error_tokens):
+                return "YouTube 播放器的 JavaScript 挑战解析没有成功运行。请使用内置 Deno 与 EJS 组件的最新版 ACAN Studio，重新打开视频页面后再试；如果仍失败，请把完整日志发给开发者。"
+            if ACANCreatorApp._is_login_or_cookie_error(output):
+                return "该 YouTube 视频可能需要登录或年龄验证。请在 Mac 的 Chrome 中登录可正常观看该视频的账号，并在设置中启用浏览器 Cookie 后重试。"
+            return "请确认 YouTube 视频是公开可播放的，检查网络后重新尝试。"
+
         if platform_name == "抖音":
             douyin_message = ACANCreatorApp._classify_douyin_error(output)
             if douyin_message:
@@ -1763,6 +1794,7 @@ class ACANCreatorApp(ctk.CTk):
     def check_backend_tools(self):
         self._write_log("========== 后台工具检测 ==========")
         self._log_tool_status("yt-dlp", ["yt-dlp", "--version"])
+        self._log_tool_status("Deno（YouTube JavaScript）", ["deno", "--version"])
         self._log_tool_status("ffmpeg", ["ffmpeg", "-version"])
 
         cookie_source = self.settings.get("cookie_source", "不使用")
@@ -3347,6 +3379,7 @@ class ACANCreatorApp(ctk.CTk):
                 missing.append(warn_message)
 
         add_check(bool(self._find_tool("yt-dlp")), "yt-dlp", "yt-dlp 未检测到")
+        add_check(bool(self._find_tool("deno")), "YouTube JavaScript 运行时 Deno", "Deno 未检测到（YouTube 下载需要）")
         add_check(bool(self._find_tool("ffmpeg")), "ffmpeg", "ffmpeg 未检测到")
         ocr_engine = self._detect_ocr_engine()
         add_check(bool(ocr_engine), f"OCR 引擎 {ocr_engine['name']}" if ocr_engine else "OCR 引擎未安装", "OCR 引擎未安装")

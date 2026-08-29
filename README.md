@@ -101,6 +101,7 @@ Creator/
 源码直接运行时，后台需要这些工具：
 
 - `yt-dlp`
+- `deno`（YouTube 新版播放器的 JavaScript 挑战解析）
 - `ffmpeg`
 - `tesseract`（用于画面文字 OCR，可在应用里点击“立即安装 OCR”自动安装）
 - `faster-whisper` 或 `openai-whisper`（用于音频转文字，可选安装）
@@ -108,10 +109,10 @@ Creator/
 如果没有安装，可以使用 Homebrew 安装：
 
 ```bash
-brew install yt-dlp ffmpeg tesseract
+brew install yt-dlp deno ffmpeg tesseract
 ```
 
-使用已经构建好的兼容版 DMG 时，`yt-dlp`、`ffmpeg`、`ffprobe`、macOS 原生 Vision OCR、`faster-whisper` 和 base 多语言模型会随应用一起提供，不需要在朋友的 Mac 上安装 Homebrew，也不需要首次使用时另行下载语音模型。
+使用已经构建好的兼容版 DMG 时，`yt-dlp`、`yt-dlp-ejs`、Deno、`ffmpeg`、`ffprobe`、macOS 原生 Vision OCR、`faster-whisper` 和 base 多语言模型会随应用一起提供，不需要在朋友的 Mac 上安装 Homebrew，也不需要首次使用时另行下载语音模型。
 
 首次启动时，如果检测到 OCR 或 Whisper 缺失，会显示安装向导。点击“一键安装”会后台执行：
 
@@ -204,8 +205,8 @@ chmod +x build_macos_compat_dmg.sh
 完成后会同时保留两个安装包：
 
 ```text
-dist/ACAN-Studio-1.1.7-arm64.dmg
-dist/ACAN-Studio-1.1.7-x86_64.dmg
+dist/ACAN-Studio-1.1.8-arm64.dmg
+dist/ACAN-Studio-1.1.8-x86_64.dmg
 ```
 
 M1、M2、M3、M4、M5 等 Apple 芯片 Mac 下载 `arm64` 版；使用 Intel 处理器的 Mac 下载 `x86_64` 版。打开 DMG 后，把 `ACAN Studio.app` 拖到 `Applications` 文件夹即可。

@@ -118,7 +118,7 @@ fi
 if [ -n "${ACAN_BUNDLED_TOOLS_DIR:-}" ]; then
   BUNDLED_ROOT="$ACAN_BUNDLED_TOOLS_DIR"
   echo "正在把内置后台工具加入应用..."
-  for tool_name in yt-dlp ffmpeg ffprobe; do
+  for tool_name in yt-dlp ffmpeg ffprobe deno; do
     tool_path="$BUNDLED_ROOT/tools/$tool_name"
     if [ ! -x "$tool_path" ]; then
       echo "打包失败：缺少内置工具 $tool_path"

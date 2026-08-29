@@ -4,7 +4,8 @@ set -e
 cd "$(dirname "$0")"
 
 TARGET_ARCH="${1:-arm64}"
-VERSION="${ACAN_VERSION:-1.1.7}"
+VERSION="${ACAN_VERSION:-1.1.8}"
+BUILD_LOCK_DIR="$PWD/.pyinstaller-cache/macos-compat-build.lock"
 PYTHON_VERSION="3.12.6"
 PYTHON_PACKAGE="$PWD/.pyinstaller-cache/universal-python/python-${PYTHON_VERSION}-macos11.pkg"
 PYTHON_PACKAGE_MD5="9fe25ae8e0dfea2854e6bce62e69a3dd"
@@ -14,6 +15,24 @@ PYTHON_BASE="$PYTHON_FRAMEWORK/bin/python3.12"
 PYTHON_WRAPPER="$PWD/packaging/python_arch_wrapper.sh"
 VENV_DIR="$PWD/.venv-macos-$TARGET_ARCH"
 REQUIREMENTS_FILE="$PWD/requirements-macos-compat.txt"
+
+mkdir -p "$PWD/.pyinstaller-cache"
+if ! mkdir "$BUILD_LOCK_DIR" 2>/dev/null; then
+  EXISTING_BUILD_PID="$(cat "$BUILD_LOCK_DIR/pid" 2>/dev/null || true)"
+  if [[ "$EXISTING_BUILD_PID" != <-> ]] || ! kill -0 "$EXISTING_BUILD_PID" 2>/dev/null; then
+    rm -f "$BUILD_LOCK_DIR/pid"
+    rmdir "$BUILD_LOCK_DIR" 2>/dev/null || true
+    if ! mkdir "$BUILD_LOCK_DIR" 2>/dev/null; then
+      echo "已有一个 macOS 兼容版正在构建，请等待它完成后再试。"
+      exit 75
+    fi
+  else
+    echo "已有一个 macOS 兼容版正在构建，请等待它完成后再试。"
+    exit 75
+  fi
+fi
+print -r -- "$$" > "$BUILD_LOCK_DIR/pid"
+trap 'rm -f "$BUILD_LOCK_DIR/pid"; rmdir "$BUILD_LOCK_DIR" 2>/dev/null || true' EXIT
 
 case "$TARGET_ARCH" in
   arm64|x86_64)

@@ -15,12 +15,17 @@ VISION_OCR_SOURCE="$PWD/packaging/acan_vision_ocr.swift"
 PYINSTALLER_RUNNER="$PWD/packaging/run_pyinstaller.py"
 PORTABLE_FFMPEG_RELEASE="b6.1.1"
 PORTABLE_TOOLS_CACHE="$PWD/.pyinstaller-cache/portable-tools/$PORTABLE_FFMPEG_RELEASE/$TARGET_ARCH"
+DENO_RELEASE="v2.9.6"
+DENO_CACHE="$PWD/.pyinstaller-cache/portable-tools/deno/$DENO_RELEASE/$TARGET_ARCH"
 export MACOSX_DEPLOYMENT_TARGET="${ACAN_MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
-download_verified_asset() {
-  local asset_name="$1"
+download_verified_url() {
+  local url="$1"
   local expected_sha256="$2"
-  local destination="$PORTABLE_TOOLS_CACHE/$asset_name"
+  local destination="$3"
+  local asset_name="$4"
+
+  mkdir -p "$(dirname "$destination")"
 
   if [ -f "$destination" ]; then
     local existing_sha256
@@ -31,10 +36,10 @@ download_verified_asset() {
     mv "$destination" "$destination.invalid.$(date +%Y%m%d%H%M%S)"
   fi
 
-  local temporary_download="$destination.download.$RANDOM"
-  curl --http1.1 --retry 5 --retry-all-errors --fail --location --silent --show-error \
+  local temporary_download="$destination.download"
+  curl --http1.1 --retry 10 --retry-all-errors --connect-timeout 30 --continue-at - --fail --location --silent --show-error \
     -o "$temporary_download" \
-    "https://github.com/eugeneware/ffmpeg-static/releases/download/$PORTABLE_FFMPEG_RELEASE/$asset_name"
+    "$url"
 
   local actual_sha256
   actual_sha256="$(shasum -a 256 "$temporary_download" | awk '{print $1}')"
@@ -45,6 +50,16 @@ download_verified_asset() {
     exit 1
   fi
   mv "$temporary_download" "$destination"
+}
+
+download_verified_asset() {
+  local asset_name="$1"
+  local expected_sha256="$2"
+  download_verified_url \
+    "https://github.com/eugeneware/ffmpeg-static/releases/download/$PORTABLE_FFMPEG_RELEASE/$asset_name" \
+    "$expected_sha256" \
+    "$PORTABLE_TOOLS_CACHE/$asset_name" \
+    "$asset_name"
 }
 
 if [ ! -x "$PYTHON_BIN" ]; then
@@ -90,6 +105,8 @@ case "$TARGET_ARCH" in
     FFMPEG_SHA256="a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584"
     NOTICE_SHA256="05ba4b92c96605434b1aaae3eedf5a2c280c9607bf78ffca9a5b536d9af2dc6a"
     LICENSE_SHA256="cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2"
+    DENO_ASSET="deno-aarch64-apple-darwin.zip"
+    DENO_SHA256="213a2f304f04d3c9cb5220669afad138f60a5aab1fe80962abdeb8f35807a472"
     ;;
   x86_64)
     FFMPEG_ASSET="ffmpeg-darwin-x64"
@@ -98,6 +115,8 @@ case "$TARGET_ARCH" in
     FFMPEG_SHA256="ebdddc936f61e14049a2d4b549a412b8a40deeff6540e58a9f2a2da9e6b18894"
     NOTICE_SHA256="e88a0325f8e5b75210355e37341824f074d3cd82def2125be54c914b62848a36"
     LICENSE_SHA256="2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
+    DENO_ASSET="deno-x86_64-apple-darwin.zip"
+    DENO_SHA256="7d4524b82bcc557fe020a1a5b56956ed42b992ae5b28026e8ad5d17329533f5f"
     ;;
   *)
     echo "不支持的目标架构：$TARGET_ARCH"
@@ -111,6 +130,34 @@ download_verified_asset "$FFMPEG_ASSET" "$FFMPEG_SHA256"
 download_verified_asset "$NOTICE_ASSET" "$NOTICE_SHA256"
 download_verified_asset "$LICENSE_ASSET" "$LICENSE_SHA256"
 PORTABLE_FFPROBE_PATH="$(./packaging/build_portable_ffprobe.sh "$TARGET_ARCH" "$MACOSX_DEPLOYMENT_TARGET")"
+
+echo "正在准备已校验的 Deno JavaScript 运行时（$TARGET_ARCH）..."
+DENO_ARCHIVE="$DENO_CACHE/$DENO_ASSET"
+DENO_BINARY="$DENO_CACHE/deno"
+download_verified_url \
+  "https://github.com/denoland/deno/releases/download/$DENO_RELEASE/$DENO_ASSET" \
+  "$DENO_SHA256" \
+  "$DENO_ARCHIVE" \
+  "$DENO_ASSET"
+
+if [ ! -x "$DENO_BINARY" ] || ! file "$DENO_BINARY" | grep -q "$TARGET_ARCH"; then
+  DENO_EXTRACT_DIR="$(mktemp -d -t acan-deno)"
+  ditto -x -k "$DENO_ARCHIVE" "$DENO_EXTRACT_DIR"
+  if [ ! -f "$DENO_EXTRACT_DIR/deno" ]; then
+    echo "Deno 解压失败：归档中没有 deno 可执行文件。"
+    rm -rf "$DENO_EXTRACT_DIR"
+    exit 1
+  fi
+  cp -L "$DENO_EXTRACT_DIR/deno" "$DENO_BINARY"
+  chmod +x "$DENO_BINARY"
+  rm -rf "$DENO_EXTRACT_DIR"
+fi
+
+if ! file "$DENO_BINARY" | grep -q "$TARGET_ARCH"; then
+  echo "Deno 架构校验失败：需要 $TARGET_ARCH"
+  file "$DENO_BINARY"
+  exit 1
+fi
 
 rm -rf "$BUNDLE_ROOT" "$YTDLP_BUILD_DIR"
 mkdir -p "$BUNDLE_ROOT/tools" "$BUNDLE_ROOT/licenses"
@@ -128,6 +175,10 @@ xcrun swiftc \
   -o "$BUNDLE_ROOT/tools/acan-vision-ocr"
 
 echo "正在生成独立 yt-dlp..."
+"$PYTHON_BIN" -c 'import yt_dlp_ejs' || {
+  echo "打包失败：yt-dlp-ejs 未正确安装。"
+  exit 1
+}
 YTDLP_PYINSTALLER_ARGS=(
   --onefile \
   --noconfirm \
@@ -137,6 +188,7 @@ YTDLP_PYINSTALLER_ARGS=(
   --workpath "$YTDLP_BUILD_DIR" \
   --specpath "$PWD/.pyinstaller-cache" \
   --collect-all yt_dlp
+  --collect-all yt_dlp_ejs
   --target-arch "$TARGET_ARCH"
 )
 
@@ -154,9 +206,11 @@ fi
 
 cp -L "$PORTABLE_TOOLS_CACHE/$FFMPEG_ASSET" "$BUNDLE_ROOT/tools/ffmpeg"
 cp -L "$PORTABLE_FFPROBE_PATH" "$BUNDLE_ROOT/tools/ffprobe"
+cp -L "$DENO_BINARY" "$BUNDLE_ROOT/tools/deno"
 cp -L "$PORTABLE_TOOLS_CACHE/$NOTICE_ASSET" "$BUNDLE_ROOT/licenses/ffmpeg-static.README"
 cp -L "$PORTABLE_TOOLS_CACHE/$LICENSE_ASSET" "$BUNDLE_ROOT/licenses/ffmpeg-static.LICENSE"
-chmod +x "$BUNDLE_ROOT/tools/ffmpeg" "$BUNDLE_ROOT/tools/ffprobe"
+cp -L "$PWD/packaging/licenses/DENO-LICENSE.md" "$BUNDLE_ROOT/licenses/DENO-LICENSE.md"
+chmod +x "$BUNDLE_ROOT/tools/ffmpeg" "$BUNDLE_ROOT/tools/ffprobe" "$BUNDLE_ROOT/tools/deno"
 
 if command -v xattr >/dev/null 2>&1; then
   xattr -cr "$BUNDLE_ROOT" || true

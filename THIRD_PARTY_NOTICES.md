@@ -4,6 +4,10 @@ The optional embedded-runtime DMG includes third-party command-line tools. They
 remain under their own licenses and are not relicensed by ACAN Studio.
 
 - yt-dlp: Unlicense. Project: <https://github.com/yt-dlp/yt-dlp>
+- yt-dlp-ejs: Unlicense with bundled components under MIT and ISC. Project:
+  <https://github.com/yt-dlp/ejs>
+- Deno: MIT. Project: <https://github.com/denoland/deno>. The exact license is
+  included in the app's `licenses` directory.
 - FFmpeg/FFprobe: GPL-3.0-or-later static builds distributed by ffmpeg-static.
   Project and source: <https://ffmpeg.org/>. Binary build project:
   <https://github.com/eugeneware/ffmpeg-static>. The exact binary README and
