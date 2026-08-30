@@ -4,7 +4,12 @@ set -e
 cd "$(dirname "$0")"
 
 TARGET_ARCH="${1:-arm64}"
-VERSION="${ACAN_VERSION:-1.1.9}"
+VERSION_FILE="$PWD/VERSION"
+if [ -n "${ACAN_VERSION:-}" ]; then
+  VERSION="$ACAN_VERSION"
+else
+  VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+fi
 BUILD_LOCK_DIR="$PWD/.pyinstaller-cache/macos-compat-build.lock"
 PYTHON_VERSION="3.12.6"
 PYTHON_PACKAGE="$PWD/.pyinstaller-cache/universal-python/python-${PYTHON_VERSION}-macos11.pkg"

@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from urllib.parse import parse_qs, urlparse, urlunparse
+from urllib.parse import parse_qs, urlparse
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, getproxies, urlopen
 
@@ -22,6 +22,24 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from ui_v2 import build_ui_v2
+from acan_studio.core.downloader import (
+    build_yt_dlp_download_attempts,
+    build_youtube_network_args,
+    clean_url_parameters,
+)
+from acan_studio.core.errors import platform_stage_suggestion
+from acan_studio.core.media import (
+    calculate_target_bitrates,
+    classify_content_type,
+    detect_platform,
+    extract_first_url,
+    format_duration,
+    format_file_size,
+    format_srt_time,
+    segments_from_srt,
+    segments_to_srt,
+    srt_to_plain_text,
+)
 
 
 APP_NAME = "ACAN Studio"
@@ -64,7 +82,6 @@ EMBEDDED_TOOL_DIR_NAME = "tools"
 EMBEDDED_TESSDATA_DIR_NAME = "tessdata"
 EMBEDDED_MODEL_DIR_NAME = "models"
 FASTER_WHISPER_MODEL_DIR_NAME = "faster-whisper-base"
-URL_PATTERN = re.compile(r"https?://[^\s]+")
 YTDLP_PERCENT_PATTERN = re.compile(r"\[download\]\s+(?P<percent>\d+(?:\.\d+)?)%")
 YTDLP_SPEED_PATTERN = re.compile(r"\bat\s+(?P<speed>\S+/s)")
 YTDLP_ETA_PATTERN = re.compile(r"\bETA\s+(?P<eta>\S+)")
@@ -768,22 +785,7 @@ class ACANCreatorApp(ctk.CTk):
         return ["--js-runtimes", f"deno:{deno_path}"]
 
     def _youtube_network_args(self, platform, chunk_size, retries):
-        # YouTube 视频流走 googlevideo.com，代理下的长连接容易抖动或提前中断。
-        # 小分块会频繁建立可续传的 Range 请求，避免数百 MB 文件依赖一条长连接。
-        if platform["name"] != "YouTube":
-            return []
-        return [
-            "--force-ipv4",
-            "--extractor-retries", "10",
-            "--retries", str(retries),
-            "--fragment-retries", str(retries),
-            "--retry-sleep", "http:linear=1:5:1",
-            "--retry-sleep", "fragment:linear=1:5:1",
-            "--retry-sleep", "extractor:linear=1:5:1",
-            "--http-chunk-size", chunk_size,
-            "--socket-timeout", "30",
-            "--continue",
-        ]
+        return build_youtube_network_args(platform, chunk_size, retries)
 
     @staticmethod
     def _system_proxy_url():
@@ -799,133 +801,20 @@ class ACANCreatorApp(ctk.CTk):
         return ""
 
     def _build_yt_dlp_download_attempts(self, platform, url, destination_dir, engine):
-        # Include the platform video ID so episodes with the same title/date do
-        # not collide. This is especially important for MangoTV program pages.
-        output_template = str(destination_dir / "%(uploader|未知作者).100B" / "%(upload_date|未知日期)s_%(title).200B_[%(id|未知ID)s].%(ext)s")
-        javascript_args = self._youtube_javascript_args(platform)
-        base_command = [
-            "yt-dlp",
-            *javascript_args,
-            "--merge-output-format",
-            "mp4",
-            "--no-mtime",
-            "--no-simulate",
-            "--print",
-            "before_dl:ACAN_EXPECTED_DURATION=%(duration|0)s",
-            "--print",
-            "after_move:ACAN_DOWNLOADED_FILE=%(filepath)s",
-            "-o",
-            output_template,
+        return build_yt_dlp_download_attempts(
+            platform,
             url,
-        ]
-
-        if platform["name"] == "YouTube":
-            cookie_args = self._cookie_args()
-            attempts = [
-                (
-                    f"{engine['name']}：YouTube 分块断点续传",
-                    [
-                        "yt-dlp",
-                        *cookie_args,
-                        *self._youtube_network_args(platform, "2M", 20),
-                        *base_command[1:],
-                    ],
-                ),
-                (
-                    f"{engine['name']}：YouTube 小分块备用续传",
-                    [
-                        "yt-dlp",
-                        *cookie_args,
-                        *self._youtube_network_args(platform, "512K", 40),
-                        *base_command[1:],
-                    ],
-                ),
-            ]
-
-            curl_path = self._find_tool("curl")
-            if curl_path:
-                proxy_url = self._system_proxy_url()
-                proxy_args = ["--proxy", proxy_url] if proxy_url else []
-                attempts.append(
-                    (
-                        f"{engine['name']}：YouTube curl 备用传输",
-                        [
-                            "yt-dlp",
-                            *cookie_args,
-                            *proxy_args,
-                            "--force-ipv4",
-                            "--extractor-retries", "10",
-                            "--retries", "30",
-                            "--retry-sleep", "extractor:linear=1:5:1",
-                            "--socket-timeout", "30",
-                            "--continue",
-                            "--downloader", f"http:{curl_path}",
-                            "--downloader-args",
-                            "curl:--retry-all-errors --retry-delay 1 --connect-timeout 30 --speed-time 30 --speed-limit 1024 --http1.1 --fail",
-                            *base_command[1:],
-                        ],
-                    )
-                )
-            return attempts
-
-        if platform["name"] == "抖音":
-            return [
-                (f"{engine['name']}：使用 Chrome Cookie", ["yt-dlp", "--cookies-from-browser", "chrome", *base_command[1:]]),
-            ]
-
-        if platform["name"] == "微博":
-            cleaned_url = ACANCreatorApp._clean_url_parameters(url)
-            cleaned_base_command = [*base_command[:-1], cleaned_url]
-            attempts = [
-                (
-                    f"{engine['name']}：微博第一次尝试：原始链接 + Chrome Cookie",
-                    ["yt-dlp", "--cookies-from-browser", "chrome", *base_command[1:]],
-                ),
-            ]
-            attempts.append(
-                (
-                    f"{engine['name']}：微博第二次尝试：清理 URL 参数 + Chrome Cookie",
-                    ["yt-dlp", "--cookies-from-browser", "chrome", *cleaned_base_command[1:]],
-                )
-            )
-            return attempts
-
-        if platform["name"] == "芒果TV":
-            browser_headers = [
-                "--referer",
-                "https://www.mgtv.com/",
-                "--user-agent",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-            ]
-            access_filter = [item for expression in MGTV_SVIP_FILTERS for item in ("--match-filter", expression)]
-            cookie_args = self._cookie_args()
-            attempts = []
-            if cookie_args:
-                attempts.append(
-                    (
-                        f"{engine['name']}：芒果TV第一次尝试：使用设置中的登录态",
-                        ["yt-dlp", *cookie_args, *browser_headers, *access_filter, *base_command[1:]],
-                    )
-                )
-            attempts.append(
-                (
-                    f"{engine['name']}：芒果TV标准下载",
-                    ["yt-dlp", *browser_headers, *access_filter, *base_command[1:]],
-                )
-            )
-            return attempts
-
-        cookie_args = self._cookie_args()
-        return [
-            (engine["name"], ["yt-dlp", *cookie_args, *base_command[1:]] if cookie_args else base_command),
-        ]
+            destination_dir,
+            engine,
+            cookie_args=self._cookie_args(),
+            deno_path=self._find_tool("deno"),
+            curl_path=self._find_tool("curl"),
+            proxy_url=self._system_proxy_url(),
+        )
 
     @staticmethod
     def _clean_url_parameters(url):
-        parsed = urlparse(url or "")
-        if not parsed.scheme or not parsed.netloc:
-            return url
-        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        return clean_url_parameters(url)
 
     def _build_subtitle_attempts(self, platform, url, subtitle_dir):
         subtitle_template = str(subtitle_dir / "%(uploader|未知作者).100B" / "%(upload_date|未知日期)s_%(title).200B.%(ext)s")
@@ -964,39 +853,7 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _classify_content_type(url, platform):
-        parsed = urlparse(url or "")
-        path = parsed.path.lower()
-        host = parsed.netloc.lower()
-        query = parsed.query.lower()
-
-        if "live" in path or "live" in host:
-            return "live"
-        if any(token in path for token in ("/collection", "/playlist", "/series", "/channel/collection")):
-            return "collection"
-        if any(token in path for token in ("/user/", "/profile/", "/channel/", "/space/")) and "/video/" not in path:
-            return "profile"
-
-        if platform["name"] == "抖音":
-            if "/video/" in path:
-                return "video"
-            if "/note/" in path:
-                return "note"
-            if "/jingxuan" in path:
-                return "collection"
-
-        if platform["name"] == "小红书":
-            if "type=video" in query:
-                return "video"
-            if any(token in path for token in ("/explore/", "/discovery/item/", "/item/")):
-                return "video"
-            if "note" in path:
-                return "note"
-
-        if platform["name"] in ("YouTube", "B站", "微博", "芒果TV"):
-            if path and path != "/":
-                return "video"
-
-        return "unknown"
+        return classify_content_type(url, platform["name"])
 
     @staticmethod
     def _mode_needs_download(mode):
@@ -1387,69 +1244,7 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _platform_stage_suggestion(platform_name, stage, output):
-        if platform_name == "YouTube":
-            normalized_output = (output or "").lower()
-            javascript_error_tokens = (
-                "n challenge solving failed",
-                "supported javascript runtime",
-                "challenge solver script distribution",
-                "the page needs to be reloaded",
-            )
-            if any(token in normalized_output for token in javascript_error_tokens):
-                return "YouTube 播放器的 JavaScript 挑战解析没有成功运行。请使用内置 Deno 与 EJS 组件的最新版 ACAN Studio，重新打开视频页面后再试；如果仍失败，请把完整日志发给开发者。"
-            ssl_error_tokens = (
-                "unexpected_eof_while_reading",
-                "eof occurred in violation of protocol",
-                "ssl connection",
-                "tls connection",
-            )
-            if any(token in normalized_output for token in ssl_error_tokens):
-                return "YouTube 视频已经解析成功，但网络或代理提前切断了加密传输。最新版会自动依次尝试分块断点续传、小分块续传和 curl 备用传输；如果仍失败，请切换代理节点或网络后重试，已有的 .part 文件会继续续传。"
-            if ACANCreatorApp._is_login_or_cookie_error(output):
-                return "该 YouTube 视频可能需要登录或年龄验证。请在 Mac 的 Chrome 中登录可正常观看该视频的账号，并在设置中启用浏览器 Cookie 后重试。"
-            return "请确认 YouTube 视频是公开可播放的，检查网络后重新尝试。"
-
-        if platform_name == "抖音":
-            douyin_message = ACANCreatorApp._classify_douyin_error(output)
-            if douyin_message:
-                return f"{douyin_message}\n抖音链接已成功识别，请稍后更新 yt-dlp 后重试，或使用备用下载方案。"
-            return "抖音下载失败，请确认链接是公开视频页；如果 yt-dlp 仍无法解析，可稍后更新 yt-dlp 或使用备用下载方案。"
-
-        if platform_name == "微博":
-            if ACANCreatorApp._is_weibo_visitor_error(output):
-                return WEIBO_VISITOR_ERROR_MESSAGE
-            if stage == "下载":
-                return "微博视频下载失败，请检查链接是否公开、是否需要登录，或稍后重试。"
-            if stage == "转码":
-                return "视频已下载，但转码修复失败，请查看 ffmpeg 日志。"
-            if stage == "OCR":
-                return "OCR 失败，请确认本地视频已经下载成功，并检查 OCR 引擎是否可用。"
-            if stage == "音频转文字":
-                return "音频转文字失败，请确认视频有可识别音轨，并检查 Whisper/faster-whisper 是否可用。"
-            return "微博处理失败，请检查链接是否公开、是否需要登录，或稍后重试。"
-
-        if platform_name == "小红书" and ACANCreatorApp._is_login_or_cookie_error(output):
-            return "手机 App 登录状态不能被电脑读取，请在 Mac 的 Chrome 中登录小红书网页版后重试。"
-
-        if platform_name == "芒果TV":
-            normalized_output = (output or "").lower()
-            if any(token in normalized_output for token in ("drm", "widevine", "protected content")):
-                return "该芒果TV视频受平台版权保护。即使账号拥有 SVIP，ACAN Studio 也不能绕过此类保护，请在芒果TV官方网页或 App 内观看。"
-            if "unsupported url" in normalized_output:
-                return "芒果TV链接暂时无法被 yt-dlp 解析。请确认复制的是视频播放页地址，不是首页、专题页或搜索页；也可以更新 yt-dlp 后重试。"
-            if ACANCreatorApp._is_login_or_cookie_error(output) or any(token in normalized_output for token in ("403", "forbidden", "login", "vip", "付费")):
-                return "芒果TV可能需要网页登录或会员权限。请在 Chrome 登录拥有会员权益的账号，并确认该视频能正常播放后再重试；受版权保护的视频无法通过本工具导出。"
-            return "芒果TV下载失败，请确认链接是公开视频播放页、网络正常，并尝试更新 yt-dlp。完整错误日志已保留。"
-
-        if stage == "转码":
-            return "视频已下载，但转码修复失败，请查看 ffmpeg 日志。"
-        if stage == "OCR":
-            return "OCR 失败，请确认本地视频已经下载成功，并检查 OCR 引擎是否可用。"
-        if stage == "音频转文字":
-            return "音频转文字失败，请确认视频有可识别音轨，并检查 Whisper/faster-whisper 是否可用。"
-        if ACANCreatorApp._is_login_or_cookie_error(output):
-            return "当前平台可能需要登录，请在 Mac 的 Chrome 中登录对应平台网页版后重试。"
-        return "请检查链接是否公开、网络是否正常，或稍后重试。"
+        return platform_stage_suggestion(platform_name, stage, output)
 
     @staticmethod
     def _is_weibo_visitor_error(output):
@@ -1709,35 +1504,13 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _segments_from_srt(content):
-        segments = []
-        blocks = re.split(r"\n\s*\n", content.strip())
-        for block in blocks:
-            lines = [line.strip() for line in block.splitlines() if line.strip()]
-            if len(lines) < 3:
-                continue
-            time_line = next((line for line in lines if "-->" in line), "")
-            if not time_line:
-                continue
-            start_text, end_text = [part.strip() for part in time_line.split("-->", 1)]
-            text_lines = [line for line in lines if line != time_line and not line.isdigit()]
-            text = " ".join(text_lines).strip()
-            if not text:
-                continue
-            segments.append({
-                "start": ACANCreatorApp._parse_srt_time(start_text),
-                "end": ACANCreatorApp._parse_srt_time(end_text),
-                "text": text,
-            })
-        return segments
+        return segments_from_srt(content)
 
     @staticmethod
     def _parse_srt_time(value):
-        value = value.replace(",", ".").strip()
-        try:
-            hours, minutes, seconds = value.split(":")
-            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-        except Exception:
-            return 0.0
+        from acan_studio.core.media import parse_srt_time
+
+        return parse_srt_time(value)
 
     def _recognize_frame_text(self, frame, ocr_engine, image_module):
         if ocr_engine["kind"] == "vision":
@@ -1812,46 +1585,15 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _srt_to_plain_text(content):
-        lines = []
-        seen = set()
-        for line in content.splitlines():
-            cleaned = line.strip()
-            if not cleaned or cleaned.isdigit() or "-->" in cleaned:
-                continue
-            key = cleaned.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            lines.append(cleaned)
-        return "\n".join(lines) + ("\n" if lines else "")
+        return srt_to_plain_text(content)
 
     @staticmethod
     def _segments_to_srt(segments):
-        if not segments:
-            return "1\n00:00:00,000 --> 00:00:01,000\n未识别到清晰语音内容。\n"
-
-        blocks = []
-        for index, segment in enumerate(segments, start=1):
-            text = segment["text"].strip()
-            if not text:
-                continue
-            blocks.append(
-                f"{index}\n{ACANCreatorApp._format_srt_time(segment['start'])} --> {ACANCreatorApp._format_srt_time(segment['end'])}\n{text}\n"
-            )
-        return "\n".join(blocks) + ("\n" if blocks else "")
+        return segments_to_srt(segments)
 
     @staticmethod
     def _format_srt_time(seconds):
-        seconds = max(0, float(seconds or 0))
-        milliseconds = int(round((seconds - int(seconds)) * 1000))
-        total_seconds = int(seconds)
-        hours = total_seconds // 3600
-        minutes = (total_seconds % 3600) // 60
-        secs = total_seconds % 60
-        if milliseconds >= 1000:
-            secs += 1
-            milliseconds -= 1000
-        return f"{hours:02}:{minutes:02}:{secs:02},{milliseconds:03}"
+        return format_srt_time(seconds)
 
     def clear_input(self):
         self.url_entry.delete("1.0", "end")
@@ -2276,21 +2018,11 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _calculate_target_bitrates(target_size_mb, duration_seconds, audio_bitrate_kbps=64, safety_ratio=0.96):
-        # 1MB ≈ 8192 kilobits。留 4% 余量，避免成品超过目标大小。
-        target_total_kbits = float(target_size_mb) * 8192 * safety_ratio
-        total_bitrate_kbps = target_total_kbits / float(duration_seconds)
-        video_bitrate_kbps = int(total_bitrate_kbps - audio_bitrate_kbps)
-        return max(video_bitrate_kbps, 100), audio_bitrate_kbps
+        return calculate_target_bitrates(target_size_mb, duration_seconds, audio_bitrate_kbps, safety_ratio)
 
     @staticmethod
     def _format_duration(seconds):
-        seconds = int(seconds)
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        remain = seconds % 60
-        if hours:
-            return f"{hours}小时{minutes}分{remain}秒"
-        return f"{minutes}分{remain}秒"
+        return format_duration(seconds)
 
     def _read_video_info(self, input_path, ffprobe_path=None):
         info = {
@@ -2335,12 +2067,7 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _format_file_size(size_bytes):
-        size = float(size_bytes)
-        for unit in ("B", "KB", "MB", "GB"):
-            if size < 1024 or unit == "GB":
-                return f"{size:.1f}{unit}" if unit != "B" else f"{int(size)}B"
-            size /= 1024
-        return f"{size:.1f}GB"
+        return format_file_size(size_bytes)
 
     def _compress_video_worker(self, jobs, ffmpeg_path):
         try:
@@ -2887,11 +2614,7 @@ class ACANCreatorApp(ctk.CTk):
 
     @staticmethod
     def _extract_first_url(text):
-        match = URL_PATTERN.search(text)
-        if not match:
-            return None
-
-        return match.group(0).strip()
+        return extract_first_url(text)
 
     def _resolve_redirect_url(self, url, platform=None):
         if platform and platform["name"] == "微博":
@@ -2981,10 +2704,6 @@ class ACANCreatorApp(ctk.CTk):
         return note_path
 
     def _detect_platform(self, url):
-        lowered_url = (url or "").lower()
-        host = urlparse(url).netloc.lower()
-        normalized_host = host[4:] if host.startswith("www.") else host
-
         platform_checks = [
             DOWNLOAD_PLATFORMS["douyin"],
             DOWNLOAD_PLATFORMS["youtube"],
@@ -2993,12 +2712,7 @@ class ACANCreatorApp(ctk.CTk):
             DOWNLOAD_PLATFORMS["weibo"],
             DOWNLOAD_PLATFORMS["mangotv"],
         ]
-        for platform in platform_checks:
-            for item in platform["hosts"]:
-                if item in lowered_url or normalized_host == item or normalized_host.endswith(f".{item}"):
-                    return platform
-
-        return UNKNOWN_PLATFORM
+        return detect_platform(url, platform_checks, UNKNOWN_PLATFORM)
 
     def _extract_error_reason(self, output):
         lines = [line.strip() for line in output.splitlines() if line.strip()]

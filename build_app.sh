@@ -15,7 +15,12 @@ MACOS_RUNTIME_HOOK="$PWD/packaging/runtime_hook_macos_version.py"
 PYINSTALLER_RUNNER="$PWD/packaging/run_pyinstaller.py"
 WHISPER_MODEL_DIR="$PWD/.pyinstaller-cache/models/faster-whisper-base"
 TARGET_ARCH="${ACAN_TARGET_ARCH:-}"
-VERSION="${ACAN_VERSION:-1.1.9}"
+VERSION_FILE="$PWD/VERSION"
+if [ -n "${ACAN_VERSION:-}" ]; then
+  VERSION="$ACAN_VERSION"
+else
+  VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+fi
 export MACOSX_DEPLOYMENT_TARGET="${ACAN_MACOSX_DEPLOYMENT_TARGET:-11.0}"
 export PYINSTALLER_CONFIG_DIR="${ACAN_PYINSTALLER_CONFIG_DIR:-$PWD/.pyinstaller-cache}"
 

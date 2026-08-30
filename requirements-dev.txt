@@ -1,0 +1,2 @@
+# The core test suite intentionally uses only the Python standard library.
+# Install requirements.txt as well when running the desktop application locally.

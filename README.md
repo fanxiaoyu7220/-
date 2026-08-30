@@ -1,7 +1,12 @@
 # ACAN Studio
 
-ACAN Studio 是一个给视频创作者使用的 macOS 图形界面素材工具。  
-它使用 Python 3 + customtkinter 开发，后续可以用 PyInstaller 打包成 `.app`。
+> Open-source desktop media workspace for video creators.
+
+ACAN Studio 是一个给视频创作者使用的 macOS 图形界面素材工作台，当前版本线为 **1.2.x**。它使用 Python 3 + CustomTkinter，后端调用 yt-dlp、FFmpeg 和可选的 OCR/Whisper 组件；既可以直接运行源码，也可以用 PyInstaller 打包成 `.app`。
+
+项目当前处于持续开发阶段：下载、转码、字幕、OCR、音频转文字和素材整理已经可用，1.2.x 正在补齐可测试的核心层、贡献规范和发布流程。
+
+文档入口：[贡献指南](CONTRIBUTING.md) · [变更记录](CHANGELOG.md) · [路线图](ROADMAP.md) · [安全说明](SECURITY.md)
 
 这是一个可独立运行的开源项目。仓库只包含源码、构建脚本和文档，不包含个人素材、浏览器 Cookie、下载结果或本地虚拟环境。
 
@@ -13,7 +18,7 @@ ACAN Studio 是一个给视频创作者使用的 macOS 图形界面素材工具�
 - 下载、转码、字幕提取和内容保存请遵守所在平台的服务条款、版权规定和内容发布者的授权范围。
 - ACAN Studio 不绕过 DRM、付费墙或平台访问控制；项目作者不对下载内容的合法性负责。
 
-## 功能 v1.1 统一升级版
+## 功能
 
 - 下载视频：粘贴链接或整段分享文案后，自动识别第一个 `http://` 或 `https://` 链接
 - 手机分享文案预处理：自动提取链接，并解析 `v.douyin.com`、`xhslink.com`、`b23.tv`、`m.weibo.cn`、`youtu.be`
@@ -150,10 +155,10 @@ pip install openai-whisper
 
 ## 安装依赖
 
-进入项目目录：
+进入项目目录（仓库当前名称仍为 `-`，后续会改为 `ACAN-Studio`）：
 
 ```bash
-cd "ACAN Studio"
+cd path/to/repository
 ```
 
 建议先创建虚拟环境：
@@ -206,8 +211,8 @@ chmod +x build_macos_compat_dmg.sh
 完成后会同时保留两个安装包：
 
 ```text
-dist/ACAN-Studio-1.1.9-arm64.dmg
-dist/ACAN-Studio-1.1.9-x86_64.dmg
+dist/ACAN-Studio-1.2.0-arm64.dmg
+dist/ACAN-Studio-1.2.0-x86_64.dmg
 ```
 
 M1、M2、M3、M4、M5 等 Apple 芯片 Mac 下载 `arm64` 版；使用 Intel 处理器的 Mac 下载 `x86_64` 版。打开 DMG 后，把 `ACAN Studio.app` 拖到 `Applications` 文件夹即可。
