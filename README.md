@@ -155,7 +155,7 @@ pip install openai-whisper
 
 ## 安装依赖
 
-进入项目目录（仓库当前名称仍为 `-`，后续会改为 `ACAN-Studio`）：
+进入项目目录：
 
 ```bash
 cd path/to/repository

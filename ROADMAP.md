@@ -11,7 +11,7 @@ they can be verified.
 - [x] Make browser-cookie use explicitly opt-in for all download paths.
 - [x] Add automated core tests and a lightweight CI check.
 - [x] Document contribution, security, release, and issue workflows.
-- [ ] Rename the GitHub repository from `-` to `ACAN-Studio` and update links.
+- [x] Rename the GitHub repository from `-` to `ACAN-Studio` and update links.
 - [ ] Publish a clean 1.2.0 release with refreshed screenshots and checksums.
 
 ## 1.3.x — creator workflow improvements

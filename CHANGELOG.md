@@ -36,5 +36,5 @@ add creator-facing capabilities, and major releases may change workflows.
 - Added resilient YouTube transport fallbacks and Apple Silicon/Intel macOS
   compatibility packaging.
 
-[Unreleased]: https://github.com/fanxiaoyu7220/-/compare/v1.1.8...HEAD
-[1.1.8]: https://github.com/fanxiaoyu7220/-/releases/tag/v1.1.8
+[Unreleased]: https://github.com/fanxiaoyu7220/ACAN-Studio/compare/v1.1.8...HEAD
+[1.1.8]: https://github.com/fanxiaoyu7220/ACAN-Studio/releases/tag/v1.1.8
