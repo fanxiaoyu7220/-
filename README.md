@@ -23,6 +23,7 @@ ACAN Studio 是一个给视频创作者使用的 macOS 图形界面素材工具�
 - Cookie 管理：支持用户主动选择 Chrome Cookie 或 `Cookies.txt`，默认不读取 Cookie，失败时给中文登录建议
 - 下载并修复：下载后自动用 `ffmpeg` 转成 H.264 视频编码 + AAC 音频编码的 MP4，文件名带 `_fixed`
 - YouTube 下载后会自动生成剪映兼容 `_fixed.mp4`
+- YouTube 网络中断时会自动使用分块断点续传、小分块续传和系统 `curl` 备用传输，并继承 macOS 代理设置
 - 提取字幕：只提取视频已有官方字幕/自动字幕，支持 `zh-Hans`、`zh-CN`、`zh`、`en`，输出 `.srt` 和 `.txt`
 - 画面文字 OCR：每隔 2 秒抽取一帧，用 OCR 识别画面上出现的文字，去重后保存为 `video_ocr_text.txt`
 - 音频转文字：支持本地视频或已下载视频，先用 ffmpeg 提取 16kHz 单声道 WAV，再用 Whisper / faster-whisper 识别采访或语音内容，输出 `_transcript.txt` 和 `_transcript.srt`
@@ -205,8 +206,8 @@ chmod +x build_macos_compat_dmg.sh
 完成后会同时保留两个安装包：
 
 ```text
-dist/ACAN-Studio-1.1.8-arm64.dmg
-dist/ACAN-Studio-1.1.8-x86_64.dmg
+dist/ACAN-Studio-1.1.9-arm64.dmg
+dist/ACAN-Studio-1.1.9-x86_64.dmg
 ```
 
 M1、M2、M3、M4、M5 等 Apple 芯片 Mac 下载 `arm64` 版；使用 Intel 处理器的 Mac 下载 `x86_64` 版。打开 DMG 后，把 `ACAN Studio.app` 拖到 `Applications` 文件夹即可。

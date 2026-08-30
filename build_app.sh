@@ -15,6 +15,7 @@ MACOS_RUNTIME_HOOK="$PWD/packaging/runtime_hook_macos_version.py"
 PYINSTALLER_RUNNER="$PWD/packaging/run_pyinstaller.py"
 WHISPER_MODEL_DIR="$PWD/.pyinstaller-cache/models/faster-whisper-base"
 TARGET_ARCH="${ACAN_TARGET_ARCH:-}"
+VERSION="${ACAN_VERSION:-1.1.9}"
 export MACOSX_DEPLOYMENT_TARGET="${ACAN_MACOSX_DEPLOYMENT_TARGET:-11.0}"
 export PYINSTALLER_CONFIG_DIR="${ACAN_PYINSTALLER_CONFIG_DIR:-$PWD/.pyinstaller-cache}"
 
@@ -233,6 +234,11 @@ fi
 
 /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOSX_DEPLOYMENT_TARGET" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || \
   /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string $MACOSX_DEPLOYMENT_TARGET" "$APP_BUNDLE/Contents/Info.plist"
+
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || \
+  /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || \
+  /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$APP_BUNDLE/Contents/Info.plist"
 
 if [ -d "dist/$APP_NAME" ] && [ -d "$APP_BUNDLE" ]; then
   rm -rf "dist/$APP_NAME"

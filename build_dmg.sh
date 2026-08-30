@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 
 APP_NAME="ACAN Studio"
-VERSION="${ACAN_VERSION:-1.1.8}"
+VERSION="${ACAN_VERSION:-1.1.9}"
 TARGET_ARCH="${ACAN_TARGET_ARCH:-$(uname -m)}"
 APP_BUNDLE="dist/$APP_NAME.app"
 DMG_PATH="$PWD/dist/ACAN-Studio-${VERSION}-${TARGET_ARCH}.dmg"

@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from urllib.parse import parse_qs, urlparse, urlunparse
 from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, getproxies, urlopen
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -767,6 +767,37 @@ class ACANCreatorApp(ctk.CTk):
             return []
         return ["--js-runtimes", f"deno:{deno_path}"]
 
+    def _youtube_network_args(self, platform, chunk_size, retries):
+        # YouTube 视频流走 googlevideo.com，代理下的长连接容易抖动或提前中断。
+        # 小分块会频繁建立可续传的 Range 请求，避免数百 MB 文件依赖一条长连接。
+        if platform["name"] != "YouTube":
+            return []
+        return [
+            "--force-ipv4",
+            "--extractor-retries", "10",
+            "--retries", str(retries),
+            "--fragment-retries", str(retries),
+            "--retry-sleep", "http:linear=1:5:1",
+            "--retry-sleep", "fragment:linear=1:5:1",
+            "--retry-sleep", "extractor:linear=1:5:1",
+            "--http-chunk-size", chunk_size,
+            "--socket-timeout", "30",
+            "--continue",
+        ]
+
+    @staticmethod
+    def _system_proxy_url():
+        try:
+            proxies = getproxies()
+        except (OSError, ValueError):
+            return ""
+
+        for proxy_type in ("https", "http", "all"):
+            proxy_url = (proxies.get(proxy_type) or "").strip()
+            if proxy_url:
+                return proxy_url
+        return ""
+
     def _build_yt_dlp_download_attempts(self, platform, url, destination_dir, engine):
         # Include the platform video ID so episodes with the same title/date do
         # not collide. This is especially important for MangoTV program pages.
@@ -787,6 +818,55 @@ class ACANCreatorApp(ctk.CTk):
             output_template,
             url,
         ]
+
+        if platform["name"] == "YouTube":
+            cookie_args = self._cookie_args()
+            attempts = [
+                (
+                    f"{engine['name']}：YouTube 分块断点续传",
+                    [
+                        "yt-dlp",
+                        *cookie_args,
+                        *self._youtube_network_args(platform, "2M", 20),
+                        *base_command[1:],
+                    ],
+                ),
+                (
+                    f"{engine['name']}：YouTube 小分块备用续传",
+                    [
+                        "yt-dlp",
+                        *cookie_args,
+                        *self._youtube_network_args(platform, "512K", 40),
+                        *base_command[1:],
+                    ],
+                ),
+            ]
+
+            curl_path = self._find_tool("curl")
+            if curl_path:
+                proxy_url = self._system_proxy_url()
+                proxy_args = ["--proxy", proxy_url] if proxy_url else []
+                attempts.append(
+                    (
+                        f"{engine['name']}：YouTube curl 备用传输",
+                        [
+                            "yt-dlp",
+                            *cookie_args,
+                            *proxy_args,
+                            "--force-ipv4",
+                            "--extractor-retries", "10",
+                            "--retries", "30",
+                            "--retry-sleep", "extractor:linear=1:5:1",
+                            "--socket-timeout", "30",
+                            "--continue",
+                            "--downloader", f"http:{curl_path}",
+                            "--downloader-args",
+                            "curl:--retry-all-errors --retry-delay 1 --connect-timeout 30 --speed-time 30 --speed-limit 1024 --http1.1 --fail",
+                            *base_command[1:],
+                        ],
+                    )
+                )
+            return attempts
 
         if platform["name"] == "抖音":
             return [
@@ -1317,6 +1397,14 @@ class ACANCreatorApp(ctk.CTk):
             )
             if any(token in normalized_output for token in javascript_error_tokens):
                 return "YouTube 播放器的 JavaScript 挑战解析没有成功运行。请使用内置 Deno 与 EJS 组件的最新版 ACAN Studio，重新打开视频页面后再试；如果仍失败，请把完整日志发给开发者。"
+            ssl_error_tokens = (
+                "unexpected_eof_while_reading",
+                "eof occurred in violation of protocol",
+                "ssl connection",
+                "tls connection",
+            )
+            if any(token in normalized_output for token in ssl_error_tokens):
+                return "YouTube 视频已经解析成功，但网络或代理提前切断了加密传输。最新版会自动依次尝试分块断点续传、小分块续传和 curl 备用传输；如果仍失败，请切换代理节点或网络后重试，已有的 .part 文件会继续续传。"
             if ACANCreatorApp._is_login_or_cookie_error(output):
                 return "该 YouTube 视频可能需要登录或年龄验证。请在 Mac 的 Chrome 中登录可正常观看该视频的账号，并在设置中启用浏览器 Cookie 后重试。"
             return "请确认 YouTube 视频是公开可播放的，检查网络后重新尝试。"
