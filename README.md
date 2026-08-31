@@ -6,6 +6,8 @@ ACAN Studio 是一个给视频创作者使用的 macOS 图形界面素材工作�
 
 项目当前处于持续开发阶段：下载、转码、字幕、OCR、音频转文字和素材整理已经可用，1.2.x 正在补齐可测试的核心层、贡献规范和发布流程。
 
+English: [README.en.md](README.en.md)
+
 文档入口：[贡献指南](CONTRIBUTING.md) · [变更记录](CHANGELOG.md) · [路线图](ROADMAP.md) · [安全说明](SECURITY.md)
 
 这是一个可独立运行的开源项目。仓库只包含源码、构建脚本和文档，不包含个人素材、浏览器 Cookie、下载结果或本地虚拟环境。
