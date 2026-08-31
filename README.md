@@ -12,6 +12,10 @@ English: [README.en.md](README.en.md)
 
 这是一个可独立运行的开源项目。仓库只包含源码、构建脚本和文档，不包含个人素材、浏览器 Cookie、下载结果或本地虚拟环境。
 
+## 网页测试版
+
+为了让 Windows 用户无需安装即可更快体验，项目新增了独立的网页测试版。第一阶段支持公开视频链接、实时进度和结果下载，不读取浏览器 Cookie，也不处理会员、付费或 DRM 内容。网页端代码、Docker 部署方式和安全限制见 [web/README.md](web/README.md)。它与 macOS 桌面版相互独立，不会影响现有 DMG 构建。
+
 ## 开源与安全说明
 
 - 源码以 MIT License 发布，详见 [LICENSE](LICENSE)。

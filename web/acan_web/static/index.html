@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ACAN Studio 网页测试版，处理公开可访问的视频链接。">
+  <title>ACAN Studio 网页测试版</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="brand-row">
+        <div class="logo" aria-hidden="true">A</div>
+        <div>
+          <p class="eyebrow">ACAN STUDIO</p>
+          <h1>把视频素材处理，变成一件简单的事</h1>
+        </div>
+      </div>
+      <p class="lead">Windows、Mac 和手机都能打开。粘贴公开的视频链接，网页会在后台处理并生成下载文件。</p>
+      <div class="platforms" aria-label="首批支持平台">
+        <span>YouTube（可能要求验证）</span><span>B站</span><span>抖音</span><span>小红书</span><span>微博</span><span>芒果TV</span>
+      </div>
+    </header>
+
+    <section class="card" aria-labelledby="download-title">
+      <div class="section-heading">
+        <div>
+          <p class="step">网页测试版</p>
+          <h2 id="download-title">粘贴一个公开视频链接</h2>
+        </div>
+        <span class="privacy">不读取浏览器 Cookie</span>
+      </div>
+
+      <form id="job-form">
+        <label for="url">视频链接或包含链接的分享文案</label>
+        <textarea id="url" name="url" rows="4" maxlength="4096" placeholder="例如：https://www.youtube.com/watch?v=..." required></textarea>
+
+        <div id="access-wrap" class="access-wrap" hidden>
+          <label for="access-code">测试体验码</label>
+          <input id="access-code" name="access-code" type="password" maxlength="256" autocomplete="off" placeholder="请输入体验码">
+        </div>
+
+        <div class="form-footer">
+          <p>仅处理你有权保存的公开内容，不支持会员、付费、DRM 或需要登录的内容。</p>
+          <button id="submit-button" type="submit">开始处理</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="job-card" class="card job-card" aria-live="polite" hidden>
+      <div class="status-row">
+        <div>
+          <p id="platform" class="step">准备中</p>
+          <h2 id="status-title">正在创建任务</h2>
+        </div>
+        <button id="cancel-button" class="secondary" type="button">取消</button>
+      </div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      <div class="progress-meta">
+        <strong id="progress-percent">0%</strong>
+        <span id="progress-detail">等待服务器响应</span>
+      </div>
+      <p id="error-message" class="error" hidden></p>
+      <div id="download-list" class="download-list"></div>
+    </section>
+
+    <section class="notes">
+      <article>
+        <strong>打开即用</strong>
+        <p>Windows 用户不需要安装 Python、FFmpeg 或其他后台工具。</p>
+      </article>
+      <article>
+        <strong>自动清理</strong>
+        <p>测试版结果默认保留两小时，请处理完成后及时下载。</p>
+      </article>
+      <article>
+        <strong>完整功能</strong>
+        <p>登录 Cookie、本地 OCR 和语音识别将在 Windows 桌面版提供；YouTube 触发真人验证时也请使用桌面版。</p>
+      </article>
+    </section>
+  </main>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

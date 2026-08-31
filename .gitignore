@@ -9,6 +9,8 @@ __pycache__/
 *$py.class
 .Python
 .venv/
+.venv-web/
+.acan-web-data/
 .venv-macos-*/
 venv/
 env/

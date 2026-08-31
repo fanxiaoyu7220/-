@@ -1,0 +1,43 @@
+FROM python:3.12-slim
+
+ARG DENO_VERSION=2.9.6
+ARG TARGETARCH
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg unzip \
+    && case "${TARGETARCH:-amd64}" in \
+         amd64) DENO_ARCH="x86_64" ;; \
+         arm64) DENO_ARCH="aarch64" ;; \
+         *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}-unknown-linux-gnu.zip" -o /tmp/deno.zip \
+    && unzip /tmp/deno.zip -d /usr/local/bin \
+    && chmod 0755 /usr/local/bin/deno \
+    && rm -rf /var/lib/apt/lists/* /tmp/deno.zip
+
+WORKDIR /app
+COPY requirements-web.txt ./
+RUN pip install --no-cache-dir -r requirements-web.txt
+
+COPY web/ ./web/
+RUN useradd --create-home --uid 10001 acan \
+    && mkdir -p /data/acan-web /home/acan/.cache/deno \
+    && chown -R acan:acan /data /home/acan
+
+ENV PYTHONPATH=/app/web \
+    ACAN_WEB_DATA_DIR=/data/acan-web \
+    ACAN_WEB_MAX_WORKERS=2 \
+    ACAN_WEB_MAX_PENDING=8 \
+    ACAN_WEB_RETENTION_SECONDS=7200 \
+    ACAN_WEB_MAX_FILESIZE=2G \
+    DENO_DIR=/home/acan/.cache/deno \
+    PYTHONUNBUFFERED=1
+
+USER acan
+EXPOSE 8080
+VOLUME ["/data/acan-web"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)" || exit 1
+
+CMD ["uvicorn", "acan_web.app:app", "--host", "0.0.0.0", "--port", "8080"]

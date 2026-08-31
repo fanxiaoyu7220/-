@@ -1,0 +1,18 @@
+services:
+  acan-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ACAN_WEB_ACCESS_CODE: "${ACAN_WEB_ACCESS_CODE:-please-change-me}"
+      ACAN_WEB_MAX_WORKERS: "2"
+      ACAN_WEB_MAX_PENDING: "8"
+      ACAN_WEB_MAX_FILESIZE: "2G"
+    volumes:
+      - acan-web-data:/data/acan-web
+
+volumes:
+  acan-web-data:
