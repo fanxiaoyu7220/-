@@ -72,7 +72,9 @@ tar -xf "$SOURCE_ARCHIVE" -C "$source_dir" --strip-components=1
     --disable-muxers \
     --disable-filters \
     --disable-devices >/dev/null
-  make -s -j"$(sysctl -n hw.ncpu)" ffprobe
+  # Keep compiler output out of the command substitution in build_dmg.sh;
+  # some x86_64 toolchains still print recipe progress with a silent make.
+  make -s -j"$(sysctl -n hw.ncpu)" ffprobe >&2
   cp ffprobe "$OUTPUT_PATH"
 )
 
