@@ -12,7 +12,8 @@ they can be verified.
 - [x] Add automated core tests and a lightweight CI check.
 - [x] Document contribution, security, release, and issue workflows.
 - [x] Rename the GitHub repository from `-` to `ACAN-Studio` and update links.
-- [ ] Publish a clean 1.2.0 release with refreshed screenshots and checksums.
+- [x] Publish the macOS arm64 1.2.0 release with a checksum.
+- [ ] Add refreshed screenshots and a separately validated macOS x86_64 build.
 
 ## 1.3.x — creator workflow improvements
 

@@ -4,7 +4,11 @@ All notable changes to ACAN Studio are documented here. The project follows a
 lightweight versioning scheme: patch releases fix regressions, minor releases
 add creator-facing capabilities, and major releases may change workflows.
 
-## [Unreleased] — 1.2.0 development
+## [Unreleased]
+
+Further changes after 1.2.0 will be recorded here.
+
+## [1.2.0] — 2026-08-31
 
 ### Added
 
@@ -36,5 +40,6 @@ add creator-facing capabilities, and major releases may change workflows.
 - Added resilient YouTube transport fallbacks and Apple Silicon/Intel macOS
   compatibility packaging.
 
-[Unreleased]: https://github.com/fanxiaoyu7220/ACAN-Studio/compare/v1.1.8...HEAD
+[Unreleased]: https://github.com/fanxiaoyu7220/ACAN-Studio/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/fanxiaoyu7220/ACAN-Studio/releases/tag/v1.2.0
 [1.1.8]: https://github.com/fanxiaoyu7220/ACAN-Studio/releases/tag/v1.1.8
